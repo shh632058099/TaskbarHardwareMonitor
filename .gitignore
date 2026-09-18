@@ -1,0 +1,39 @@
+# Build directories and generated CMake files
+[Bb]uild/
+[Bb]uild-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+Testing/
+.package/
+TaskbarHardwareMonitor-portable*.zip
+prompt.md
+
+# Visual Studio and other IDE files
+.vs/
+.vscode/
+*.suo
+*.user
+*.VC.db
+*.VC.VC.opendb
+
+# Compiled binaries and intermediate artifacts
+[Bb]in/
+[Oo]bj/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+!resources/PawnIO_setup.exe
+
+# Runtime and temporary files
+*.log
+*.tmp
+*.bak
+

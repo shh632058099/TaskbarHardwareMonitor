@@ -1,0 +1,12 @@
+{
+  "refresh_interval": 1000,
+  "taskbar_items": ["cpu_temperature", "cpu_usage", "network_download", "network_upload"],
+  "tray_rows": [
+    ["cpu_temperature", "cpu_usage"],
+    ["network_download", "network_upload"]
+  ],
+  "network_adapter": "auto",
+  "font_name": "微软雅黑",
+  "text_color": "FFFF00",
+  "start_with_windows": false
+}

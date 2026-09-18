@@ -1,0 +1,106 @@
+Taskbar Hardware Monitor 使用说明
+================================
+
+一、系统要求
+------------
+- Windows 8.1 / Windows 10 x64。
+- 当前版本不以 Windows 11 为主要支持目标。
+- 建议将整个目录解压到一个固定位置后再使用，不要直接在 ZIP 压缩包内运行。
+
+二、首次运行
+------------
+1. 双击 start-monitor.cmd。
+2. 启动脚本会注册当前目录中的 TaskbarBand.dll，并激活任务栏 Hardware Monitor。
+3. TaskbarHardwareMonitor.exe 会请求管理员权限，这是 CPU 温度 / CPU 功耗等底层硬件读取所需要的。
+4. 首次需要 CPU 温度时，程序会自动安装 PawnIO 驱动；PawnIO_setup.exe 和 IntelMSR.bin 已嵌入主程序，无需手工复制。
+5. Explorer 比 Monitor 更早启动时，DeskBand 会先保持隐藏；Monitor 发布第一份有效数据后才显示，不会先出现空白数据区。
+
+三、Settings
+------------
+在任务栏 Hardware Monitor 区域右键，选择 Settings。
+
+Collection interval (ms)
+- 这是实际传感器采集周期。
+- 例如 1000 表示已启用的传感器每 1000 ms 真正采集一次。
+- 支持范围：250 ~ 10000 ms。
+- 没有启用的指标不会后台采集。
+
+Metrics 与 Display format
+- Display format 为空：Metrics 勾选什么，就显示并采集什么。
+- Display format 非空：Format 是最终显示定义，Metrics 会自动同步并变为只读。
+- Format 没有引用的传感器不会采集。
+- 纯文字 Format 不会触发任何传感器采集。
+
+四、温度说明
+------------
+CPU Temperature
+- Intel CPU 优先通过 PawnIO + MSR 读取 Package/Core 温度。
+- PawnIO 路径不可用时会尝试 WMI 兼容路径。
+- CPU 温度按 Collection interval 采集，不再额外做 5 秒内部降频。
+- 不支持或读取失败时显示 --。
+
+GPU Temperature
+- 当前主要支持 NVIDIA GPU，通过 NVML 读取。
+- 没有启用 GPU Temperature 时不会初始化/查询该温度数据。
+- AMD / Intel 核显目前不作为主要支持路径。
+
+Disk Temperature
+- 读取当前选择磁盘的 NVMe SMART / ATA SMART 温度。
+- Auto 模式会优先选择可读取的 NVMe/SSD。
+- 磁盘温度按 Collection interval 采集，不再额外做 3 秒内部降频。
+- 某些 USB、RAID、驱动桥接设备可能无法提供 SMART 温度，此时显示 --。
+
+五、Display format
+-----------------
+常用变量：
+{cpu_temp}        CPU 温度
+{cpu_usage}       CPU 占用
+{cpu_clock}       CPU 频率
+{power}           CPU Package 功耗
+{gpu_temp}        GPU 温度
+{gpu_usage}       GPU 占用
+{vram}            显存使用
+{gpu_power}       GPU 功耗
+{fan}             GPU 风扇
+{disk_temp}       磁盘温度
+{ssd_temp}        磁盘温度兼容别名
+{disk_read}       磁盘读取速度
+{disk_write}      磁盘写入速度
+{down}            下载速度
+{up}              上传速度
+{ram_usage}       内存占用率
+{ram_used}        已用内存
+{ram_total}       总内存
+{battery}         电池电量 + 状态
+{battery_percent} 电池百分比
+{battery_status}  电池状态
+{system_power}    电池放电时整机功耗
+
+格式控制：
+- Enter：直接换到任务栏第二行。
+- \n：与 Enter 等价，可用于单行文本中表示换行。
+- \t：进入下一列；上下两行相同列会自动对齐。
+
+示例：
+温度:{cpu_temp}\t占用:{cpu_usage}\t内存:{ram_usage}
+上行:{up}\t下行:{down}\t电池:{battery}
+
+六、开机启动
+------------
+- Settings 中勾选 Start with Windows 后，程序使用 Windows Task Scheduler 创建登录触发任务。
+- 任务以当前用户 Interactive + Highest 权限启动，因此开机登录后可以正常读取 PawnIO/MSR 数据。
+- 不再使用 HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run。
+- 如果把整个程序目录移动到其他位置，从新目录启动一次并在 Settings 点 Save，会自动把计划任务更新到新的 EXE 路径。
+- 如果 config.json 中 start_with_windows 已经为 true，从新目录启动程序时也会自动尝试修正计划任务路径。
+
+七、便携使用注意事项
+--------------------
+- 请保持 TaskbarHardwareMonitor.exe、TaskbarBand.dll、TaskbarBandActivator.exe 和 config.json 在同一个目录。
+- 第一次从一个新目录使用时，请运行 start-monitor.cmd，它会重新注册当前目录的 DeskBand 路径。
+- config.json 保存所有主要设置。
+- 打包版默认会把 start_with_windows 设为 false，避免解压后自动修改用户的开机启动项；需要时在 Settings 中手工勾选即可。
+
+八、退出与更新
+--------------
+- 可以通过任务栏 Hardware Monitor 右键菜单退出 Monitor。
+- 更新或更换目录时，如果 Explorer 仍加载着旧版本 TaskbarBand.dll，建议重新运行 start-monitor.cmd；必要时注销/重启 Explorer 后再使用新版本。
