@@ -130,6 +130,23 @@ void TestTemperatureDisplayFormatting() {
           "invalid temperatures use a fixed placeholder");
 }
 
+void TestSharedSnapshotFreshness() {
+    monitor::SharedSensorSnapshot snapshot{};
+    snapshot.timestamp = 10000;
+    Check(monitor::IsSharedSnapshotFresh(snapshot, 10000),
+          "fresh shared snapshot is accepted");
+    Check(monitor::IsSharedSnapshotFresh(
+              snapshot, 10000 + monitor::SnapshotStaleTimeoutMs),
+          "snapshot remains valid at the stale timeout boundary");
+    Check(!monitor::IsSharedSnapshotFresh(
+              snapshot, 10001 + monitor::SnapshotStaleTimeoutMs),
+          "snapshot becomes stale after the timeout");
+    Check(!monitor::IsSharedSnapshotFresh(snapshot, 9999),
+          "future snapshot timestamp is rejected");
+    Check(monitor::SnapshotStaleTimeoutMs > monitor::SnapshotHeartbeatIntervalMs * 2,
+          "stale timeout allows multiple missed heartbeats");
+}
+
 void TestSharedDisplayConfiguration() {
     monitor::Config config;
     config.displayMode = monitor::DisplayMode::Compact;
@@ -360,6 +377,7 @@ int main() {
     TestCompactTaskbarBandLayout();
     TestNetworkSpeedUsesBoundedUnits();
     TestTemperatureDisplayFormatting();
+    TestSharedSnapshotFreshness();
     TestSharedDisplayConfiguration();
     TestBandCommandCarriesDisplayState();
     TestTaskbarConfigurationDefaults();

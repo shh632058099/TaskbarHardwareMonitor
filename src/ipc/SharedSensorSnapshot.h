@@ -9,6 +9,10 @@ namespace monitor {
 
 constexpr wchar_t SharedSensorMappingName[] = L"Local\\TaskbarHardwareMonitor.SensorSnapshot.v2";
 constexpr wchar_t SharedBandCommandMappingName[] = L"Local\\TaskbarHardwareMonitor.BandCommand.v1";
+constexpr wchar_t SharedSensorEventName[] = L"Local\\TaskbarHardwareMonitor.SensorSnapshotEvent.v1";
+constexpr wchar_t SharedBandCommandEventName[] = L"Local\\TaskbarHardwareMonitor.BandCommandEvent.v1";
+constexpr std::uint64_t SnapshotHeartbeatIntervalMs = 2000;
+constexpr std::uint64_t SnapshotStaleTimeoutMs = 7000;
 
 enum SnapshotDisplayFlags : std::uint32_t {
     TaskbarEnabled = 1u << 0,
@@ -94,6 +98,13 @@ struct SharedSensorSnapshot {
     std::uint32_t displayFlags = ShowCpuTemperature | ShowGpuTemperature |
         ShowDiskTemperature | ShowNetwork | ShowPower;
 };
+
+inline bool IsSharedSnapshotFresh(const SharedSensorSnapshot& snapshot,
+                                  std::uint64_t nowTick) {
+    return snapshot.version == 2 && snapshot.timestamp != 0 &&
+           snapshot.timestamp <= nowTick &&
+           nowTick - snapshot.timestamp <= SnapshotStaleTimeoutMs;
+}
 
 enum SnapshotValid : std::uint32_t {
     CpuTemperatureValid = 1u << 0,

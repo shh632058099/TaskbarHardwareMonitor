@@ -1,7 +1,5 @@
 #include "SharedSnapshotPublisher.h"
 
-#include <chrono>
-
 namespace monitor {
 
 SharedSnapshotPublisher::~SharedSnapshotPublisher() {
@@ -9,6 +7,8 @@ SharedSnapshotPublisher::~SharedSnapshotPublisher() {
     if (mapping_) CloseHandle(mapping_);
     if (command_) UnmapViewOfFile(command_);
     if (commandMapping_) CloseHandle(commandMapping_);
+    if (snapshotEvent_) CloseHandle(snapshotEvent_);
+    if (commandEvent_) CloseHandle(commandEvent_);
 }
 
 bool SharedSnapshotPublisher::Open() {
@@ -31,6 +31,19 @@ bool SharedSnapshotPublisher::Open() {
         *snapshot_ = {};
         snapshot_->version = 2;
     }
+    snapshotEvent_ = CreateEventW(nullptr, FALSE, FALSE, SharedSensorEventName);
+    commandEvent_ = CreateEventW(nullptr, FALSE, FALSE, SharedBandCommandEventName);
+    if (!snapshotEvent_ || !commandEvent_) {
+        if (snapshotEvent_) CloseHandle(snapshotEvent_);
+        if (commandEvent_) CloseHandle(commandEvent_);
+        snapshotEvent_ = nullptr;
+        commandEvent_ = nullptr;
+        UnmapViewOfFile(snapshot_);
+        snapshot_ = nullptr;
+        CloseHandle(mapping_);
+        mapping_ = nullptr;
+        return false;
+    }
     commandMapping_ = CreateFileMappingW(
         INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
         sizeof(SharedBandCommand), SharedBandCommandMappingName);
@@ -42,7 +55,13 @@ bool SharedSnapshotPublisher::Open() {
             CloseHandle(commandMapping_);
             commandMapping_ = nullptr;
         }
-        if (newCommandMapping && command_) *command_ = {};
+        if (newCommandMapping && command_) {
+            *command_ = {};
+        } else if (command_) {
+            // Do not replay the last command after the monitor process restarts.
+            const auto sequence = command_->sequence;
+            if (!(sequence & 1u)) commandSequence_ = sequence;
+        }
     }
     return true;
 }
@@ -65,16 +84,25 @@ bool SharedSnapshotPublisher::ReadCommand(SharedBandCommand& result) {
     return false;
 }
 
+DWORD SharedSnapshotPublisher::WaitForWake(DWORD timeoutMs) const {
+    if (commandEvent_) return WaitForSingleObject(commandEvent_, timeoutMs);
+    Sleep(timeoutMs);
+    return WAIT_TIMEOUT;
+}
+
+void SharedSnapshotPublisher::Wake() const {
+    if (commandEvent_) SetEvent(commandEvent_);
+}
+
 void SharedSnapshotPublisher::Publish(const SensorSnapshot& source, const Config& config) {
     if (!snapshot_) return;
     const auto sequence = snapshot_->sequence + 1;
     snapshot_->sequence = sequence | 1u;
     auto next = ToSharedSnapshot(source, config);
     next.sequence = sequence + 1;
-    next.timestamp = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
+    next.timestamp = static_cast<std::uint64_t>(GetTickCount64());
     *snapshot_ = next;
+    if (snapshotEvent_) SetEvent(snapshotEvent_);
 }
 
 } // namespace monitor

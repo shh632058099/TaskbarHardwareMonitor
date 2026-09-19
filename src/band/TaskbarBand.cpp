@@ -86,10 +86,12 @@ constexpr UINT CommandBattery = 1023;
 constexpr UINT CommandSystemPower = 1024;
 constexpr UINT CommandSettings = 1040;
 constexpr UINT CommandExit = 1041;
+constexpr UINT SnapshotEventMessage = WM_APP + 20;
 
 bool IsSafeMessage(UINT message) {
     return message == WM_PAINT || message == WM_TIMER || message == WM_ERASEBKGND ||
-           message == WM_RBUTTONUP || message == WM_CONTEXTMENU;
+           message == WM_RBUTTONUP || message == WM_CONTEXTMENU ||
+           message == SnapshotEventMessage;
 }
 
 void SetBandWidth(HWND window, int width) {
@@ -440,19 +442,7 @@ HRESULT STDMETHODCALLTYPE TaskbarBand::SetSite(IUnknown* site) {
     }
     ConnectSharedMemory();
     SetBandWidth(hwnd_, 1);
-    SharedSensorSnapshot initialSnapshot{};
-    if (ReadSnapshot(initialSnapshot)) {
-        monitorReady_ = true;
-        monitorEnabled_ = (initialSnapshot.displayFlags & TaskbarEnabled) != 0;
-        lastVisualSnapshot_ = initialSnapshot;
-        hasLastVisualSnapshot_ = true;
-        if (shellShowRequested_ && monitorEnabled_) {
-            ShowWindow(hwnd_, SW_SHOW);
-            InvalidateRect(hwnd_, nullptr, FALSE);
-        }
-    } else {
-        ShowWindow(hwnd_, SW_HIDE);
-    }
+    RefreshSnapshotState(hwnd_, true);
     BandLog(L"SetSite complete");
     return S_OK;
 }
@@ -556,6 +546,10 @@ HRESULT STDMETHODCALLTYPE TaskbarBand::TranslateAcceleratorIO(LPMSG) { return S_
 
 void TaskbarBand::SafeClose() {
     if (hwnd_) KillTimer(hwnd_, 1);
+    if (snapshotWait_) {
+        UnregisterWaitEx(snapshotWait_, INVALID_HANDLE_VALUE);
+        snapshotWait_ = nullptr;
+    }
     if (tooltip_) DestroyWindow(tooltip_);
     tooltip_ = nullptr;
     if (shared_) UnmapViewOfFile(shared_);
@@ -566,6 +560,10 @@ void TaskbarBand::SafeClose() {
     command_ = nullptr;
     if (commandMapping_) CloseHandle(commandMapping_);
     commandMapping_ = nullptr;
+    if (snapshotEvent_) CloseHandle(snapshotEvent_);
+    snapshotEvent_ = nullptr;
+    if (commandEvent_) CloseHandle(commandEvent_);
+    commandEvent_ = nullptr;
     if (hwnd_) DestroyWindow(hwnd_);
     hwnd_ = nullptr;
     if (site_) site_->Release();
@@ -837,6 +835,19 @@ void TaskbarBand::ConnectSharedMemory() {
             }
         }
     }
+    if (!snapshotEvent_) {
+        snapshotEvent_ = OpenEventW(SYNCHRONIZE, FALSE, SharedSensorEventName);
+    }
+    if (snapshotEvent_ && hwnd_ && !snapshotWait_) {
+        if (!RegisterWaitForSingleObject(
+                &snapshotWait_, snapshotEvent_, SnapshotEventCallback,
+                reinterpret_cast<PVOID>(hwnd_), INFINITE, WT_EXECUTEDEFAULT)) {
+            snapshotWait_ = nullptr;
+        }
+    }
+    if (!commandEvent_) {
+        commandEvent_ = OpenEventW(EVENT_MODIFY_STATE, FALSE, SharedBandCommandEventName);
+    }
 }
 
 bool TaskbarBand::ReadSnapshot(SharedSensorSnapshot& result) {
@@ -847,9 +858,53 @@ bool TaskbarBand::ReadSnapshot(SharedSensorSnapshot& result) {
         if (before & 1u) continue;
         result = *shared_;
         const auto after = shared_->sequence;
-        if (before == after && !(after & 1u) && result.version == 2 && result.timestamp != 0) return true;
+        if (before == after && !(after & 1u) &&
+            IsSharedSnapshotFresh(result, static_cast<std::uint64_t>(GetTickCount64()))) {
+            return true;
+        }
     }
     return false;
+}
+
+void TaskbarBand::RefreshSnapshotState(HWND window, bool checkSettings) {
+    SharedSensorSnapshot snapshot{};
+    if (!ReadSnapshot(snapshot)) {
+        monitorReady_ = false;
+        monitorEnabled_ = false;
+        UpdateBandSize(1);
+        if (IsWindowVisible(window)) ShowWindow(window, SW_HIDE);
+        return;
+    }
+
+    monitorReady_ = true;
+    monitorEnabled_ = (snapshot.displayFlags & TaskbarEnabled) != 0;
+    const bool shouldShow = shellShowRequested_ && monitorEnabled_;
+    const bool visible = IsWindowVisible(window) != FALSE;
+    const bool visibilityChanged = visible != shouldShow;
+    if (!monitorEnabled_) UpdateBandSize(1);
+    if (visibilityChanged) ShowWindow(window, shouldShow ? SW_SHOW : SW_HIDE);
+
+    const bool snapshotChanged = !hasLastVisualSnapshot_ ||
+        !SameVisualSnapshot(snapshot, lastVisualSnapshot_);
+    if (snapshotChanged) {
+        lastVisualSnapshot_ = snapshot;
+        hasLastVisualSnapshot_ = true;
+    }
+
+    bool settingsChanged = false;
+    if (checkSettings) {
+        FILETIME settingsWriteTime{};
+        if (ReadBandSettingsWriteTime(settingsWriteTime)) {
+            settingsChanged = !hasLastSettingsWriteTime_ ||
+                CompareFileTime(&settingsWriteTime, &lastSettingsWriteTime_) != 0;
+            lastSettingsWriteTime_ = settingsWriteTime;
+            hasLastSettingsWriteTime_ = true;
+        }
+    }
+
+    if (shouldShow && (snapshotChanged || visibilityChanged || settingsChanged)) {
+        InvalidateRect(window, nullptr, FALSE);
+    }
 }
 
 void PublishModeCommand(SharedBandCommand* command, bool compact) {
@@ -881,6 +936,11 @@ void PublishSimpleCommand(SharedBandCommand* command, BandCommandAction action) 
     command->sequence = sequence + 1;
 }
 
+VOID CALLBACK TaskbarBand::SnapshotEventCallback(PVOID context, BOOLEAN) {
+    const HWND window = reinterpret_cast<HWND>(context);
+    if (window) PostMessageW(window, SnapshotEventMessage, 0, 0);
+}
+
 LRESULT CALLBACK TaskbarBand::WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     auto* self = reinterpret_cast<TaskbarBand*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -905,42 +965,9 @@ LRESULT TaskbarBand::HandleMessage(HWND window, UINT message, WPARAM wParam, LPA
         return 0;
     }
     if (message == WM_ERASEBKGND) return 1;
-    if (message == WM_TIMER) {
+    if (message == WM_TIMER || message == SnapshotEventMessage) {
         ConnectSharedMemory();
-        SharedSensorSnapshot snapshot{};
-        if (ReadSnapshot(snapshot)) {
-            monitorReady_ = true;
-            monitorEnabled_ = (snapshot.displayFlags & TaskbarEnabled) != 0;
-            const bool shouldShow = shellShowRequested_ && monitorEnabled_;
-            const bool visible = IsWindowVisible(window) != FALSE;
-            const bool visibilityChanged = visible != shouldShow;
-            if (visibilityChanged) ShowWindow(window, shouldShow ? SW_SHOW : SW_HIDE);
-
-            const bool snapshotChanged = !hasLastVisualSnapshot_ ||
-                !SameVisualSnapshot(snapshot, lastVisualSnapshot_);
-            if (snapshotChanged) {
-                lastVisualSnapshot_ = snapshot;
-                hasLastVisualSnapshot_ = true;
-            }
-
-            FILETIME settingsWriteTime{};
-            bool settingsChanged = false;
-            if (ReadBandSettingsWriteTime(settingsWriteTime)) {
-                settingsChanged = !hasLastSettingsWriteTime_ ||
-                    CompareFileTime(&settingsWriteTime, &lastSettingsWriteTime_) != 0;
-                lastSettingsWriteTime_ = settingsWriteTime;
-                hasLastSettingsWriteTime_ = true;
-            }
-
-            if (shouldShow && (snapshotChanged || visibilityChanged || settingsChanged)) {
-                InvalidateRect(window, nullptr, FALSE);
-            }
-        } else {
-            // No publisher yet (typical during logon) means no visible DeskBand.
-            monitorReady_ = false;
-            monitorEnabled_ = false;
-            if (IsWindowVisible(window)) ShowWindow(window, SW_HIDE);
-        }
+        RefreshSnapshotState(window, message == WM_TIMER);
         return 0;
     }
     if (message != WM_RBUTTONUP && message != WM_CONTEXTMENU) {
@@ -1002,6 +1029,7 @@ LRESULT TaskbarBand::HandleMessage(HWND window, UINT message, WPARAM wParam, LPA
     DestroyMenu(menu);
     if (command == CommandDisplayFull || command == CommandDisplayCompact) {
         PublishModeCommand(command_, command == CommandDisplayCompact);
+        if (commandEvent_) SetEvent(commandEvent_);
     } else if (command == CommandRowsOne || command == CommandRowsTwo) {
         SaveLayoutRows(command == CommandRowsTwo ? 2 : 1);
         InvalidateRect(window, nullptr, FALSE);
@@ -1010,10 +1038,13 @@ LRESULT TaskbarBand::HandleMessage(HWND window, UINT message, WPARAM wParam, LPA
         std::uint32_t nextFlags = snapshot.displayFlags;
         nextFlags ^= metricFlags[command - CommandCpu];
         PublishDisplayCommand(command_, nextFlags);
+        if (commandEvent_) SetEvent(commandEvent_);
     } else if (command == CommandSettings) {
         PublishSimpleCommand(command_, BandCommandOpenSettings);
+        if (commandEvent_) SetEvent(commandEvent_);
     } else if (command == CommandExit) {
         PublishSimpleCommand(command_, BandCommandExit);
+        if (commandEvent_) SetEvent(commandEvent_);
     }
     return 0;
 }

@@ -44,9 +44,11 @@ public:
 
 private:
     static LRESULT CALLBACK WindowProc(HWND, UINT, WPARAM, LPARAM);
+    static VOID CALLBACK SnapshotEventCallback(PVOID, BOOLEAN);
     LRESULT HandleMessage(HWND, UINT, WPARAM, LPARAM);
     bool ReadSnapshot(SharedSensorSnapshot&);
     void ConnectSharedMemory();
+    void RefreshSnapshotState(HWND, bool checkSettings);
     void Paint(HDC);
     void SafeClose();
     void UpdateBandSize(int width);
@@ -58,6 +60,9 @@ private:
     const SharedSensorSnapshot* shared_{};
     HANDLE commandMapping_{};
     SharedBandCommand* command_{};
+    HANDLE snapshotEvent_{};
+    HANDLE commandEvent_{};
+    HANDLE snapshotWait_{};
     HWND tooltip_{};
     std::wstring tooltipText_;
     SharedSensorSnapshot lastVisualSnapshot_{};

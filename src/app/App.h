@@ -7,7 +7,6 @@
 #include "../ipc/SharedSnapshotPublisher.h"
 
 #include <atomic>
-#include <condition_variable>
 #include <mutex>
 #include <thread>
 
@@ -34,7 +33,6 @@ private:
     std::atomic<bool> stop_{false};
     std::atomic<int> refreshIntervalMs_{1000};
     std::mutex configMutex_;
-    std::condition_variable wake_;
     std::mutex wakeMutex_;
     bool refreshRequested_ = false;
 };

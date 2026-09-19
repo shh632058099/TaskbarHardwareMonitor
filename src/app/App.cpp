@@ -1,8 +1,7 @@
 #include "App.h"
 
 #include <windows.h>
-
-#include <chrono>
+#include <algorithm>
 
 namespace monitor {
 
@@ -50,16 +49,23 @@ void App::RequestRefresh() {
         std::lock_guard<std::mutex> lock(wakeMutex_);
         refreshRequested_ = true;
     }
-    wake_.notify_one();
+    snapshotPublisher_.Wake();
 }
 
 void App::Worker() {
+    SensorSnapshot sample{};
+    bool haveSample = false;
+    ULONGLONG lastCollectionTick = 0;
+    ULONGLONG lastPublishTick = 0;
+
     while (!stop_) {
+        bool commandRequestsRefresh = false;
         SharedBandCommand command{};
-        if (snapshotPublisher_.ReadCommand(command)) {
+        while (snapshotPublisher_.ReadCommand(command)) {
             std::lock_guard<std::mutex> configLock(configMutex_);
             if (command.action == BandCommandSetDisplay) {
                 config_.displayMode = command.displayMode ? DisplayMode::Compact : DisplayMode::Full;
+                commandRequestsRefresh = true;
             } else if (command.action == BandCommandSetMetrics) {
                 config_.taskbarEnabled = (command.displayFlags & TaskbarEnabled) != 0;
                 if (config_.taskbarFormat.empty()) {
@@ -79,34 +85,59 @@ void App::Worker() {
                     config_.showBattery = (command.displayFlags & ShowBattery) != 0;
                     config_.showSystemPower = (command.displayFlags & ShowSystemPower) != 0;
                 }
+                commandRequestsRefresh = true;
             } else if (command.action == BandCommandOpenSettings) {
                 PostMessageW(hwnd_, WM_APP + 4, 0, 0);
             } else if (command.action == BandCommandExit) {
                 PostMessageW(hwnd_, WM_APP + 5, 0, 0);
             }
         }
-        bool forceRefresh = false;
+
+        bool forceRefresh = commandRequestsRefresh;
         {
             std::lock_guard<std::mutex> lock(wakeMutex_);
-            forceRefresh = refreshRequested_;
+            forceRefresh = forceRefresh || refreshRequested_;
             refreshRequested_ = false;
         }
 
-        std::uint32_t demand = 0;
-        {
-            std::lock_guard<std::mutex> configLock(configMutex_);
-            demand = SensorDemandFromConfig(config_);
-        }
-        const auto sample = sensors_.Update(demand, forceRefresh);
-        {
-            std::lock_guard<std::mutex> configLock(configMutex_);
-            snapshotPublisher_.Publish(sample, config_);
+        const ULONGLONG now = GetTickCount64();
+        const DWORD collectionInterval = static_cast<DWORD>(refreshIntervalMs_.load());
+        const bool collectionDue = !haveSample || forceRefresh ||
+            now - lastCollectionTick >= collectionInterval;
+
+        if (collectionDue) {
+            std::uint32_t demand = 0;
+            {
+                std::lock_guard<std::mutex> configLock(configMutex_);
+                demand = SensorDemandFromConfig(config_);
+            }
+            sample = sensors_.Update(demand, forceRefresh);
+            haveSample = true;
+            lastCollectionTick = GetTickCount64();
+            {
+                std::lock_guard<std::mutex> configLock(configMutex_);
+                snapshotPublisher_.Publish(sample, config_);
+            }
+            lastPublishTick = GetTickCount64();
+        } else if (lastPublishTick == 0 ||
+                   now - lastPublishTick >= SnapshotHeartbeatIntervalMs) {
+            // Heartbeat refreshes IPC liveness only; it does not query hardware sensors.
+            {
+                std::lock_guard<std::mutex> configLock(configMutex_);
+                snapshotPublisher_.Publish(sample, config_);
+            }
+            lastPublishTick = GetTickCount64();
         }
 
-        std::unique_lock<std::mutex> lock(wakeMutex_);
-        wake_.wait_for(
-            lock, std::chrono::milliseconds(refreshIntervalMs_.load()),
-            [this] { return stop_.load() || refreshRequested_; });
+        const ULONGLONG waitStart = GetTickCount64();
+        const ULONGLONG collectionElapsed = waitStart - lastCollectionTick;
+        const ULONGLONG publishElapsed = waitStart - lastPublishTick;
+        const DWORD untilCollection = collectionElapsed >= collectionInterval
+            ? 0u : static_cast<DWORD>(collectionInterval - collectionElapsed);
+        const DWORD untilHeartbeat = publishElapsed >= SnapshotHeartbeatIntervalMs
+            ? 0u : static_cast<DWORD>(SnapshotHeartbeatIntervalMs - publishElapsed);
+        const DWORD timeout = (std::min)(untilCollection, untilHeartbeat);
+        snapshotPublisher_.WaitForWake(timeout);
     }
 }
 
@@ -118,7 +149,7 @@ int App::Run() {
     }
 
     stop_ = true;
-    wake_.notify_all();
+    snapshotPublisher_.Wake();
     if (worker_.joinable()) {
         worker_.join();
     }
@@ -156,7 +187,7 @@ LRESULT CALLBACK App::Proc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     if (message == WM_DESTROY) {
         if (self) {
             self->stop_ = true;
-            self->wake_.notify_all();
+            self->snapshotPublisher_.Wake();
         }
         PostQuitMessage(0);
         return 0;
