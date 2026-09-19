@@ -56,7 +56,7 @@ void TestIntelRaplPower() {
           "Intel RAPL wraparound delta is computed modulo 32 bits");
 }
 
-void TestTaskbarBandLayoutIsStable() {
+void TestTaskbarBandLayoutTracksValueWidth() {
     monitor::Config config;
     config.displayMode = monitor::DisplayMode::Full;
     config.taskbarRows = 1;
@@ -78,7 +78,7 @@ void TestTaskbarBandLayoutIsStable() {
     snapshot.gpuTemperatureValid = false;
     snapshot.downloadBytesPerSecond = 999ULL * 1024 * 1024;
     const auto second = monitor::BuildTaskbarLayout(snapshot, config);
-    Check(first.width == second.width, "full band width does not depend on values");
+    Check(first.width != second.width, "full band width follows the actual value width");
     Check(first.cells.size() == second.cells.size(), "missing values preserve full fields");
     Check(first.cells[0].label == L"CPU" && second.cells[0].label == L"CPU",
           "full labels remain fixed");
@@ -109,18 +109,16 @@ void TestCompactTaskbarBandLayout() {
     const auto layout = monitor::BuildTaskbarLayout(snapshot, config);
     Check(layout.cells[0].label == L"C", "compact CPU label is fixed");
     Check(layout.cells[0].value == L"52\u00B0", "compact temperature has compact unit");
-    Check(layout.cells[3].value == L"12.0M", "compact network value is formatted in a stable slot");
+    Check(layout.cells[3].value == L"12.0 MB/s", "compact network value includes the byte-per-second unit");
     Check(layout.width > 0, "compact layout has a fixed width");
 }
 
 void TestNetworkSpeedUsesBoundedUnits() {
-    Check(monitor::FormatNetworkSpeed(9 * 1024) == L"9K", "network speed uses K unit");
-    Check(monitor::FormatNetworkSpeed(12ULL * 1024 * 1024) == L"12.0M",
-          "network speed uses one decimal M unit");
-    Check(monitor::FormatNetworkSpeed(2ULL * 1024 * 1024 * 1024) == L"2.0G",
-          "network speed uses G unit");
-    Check(monitor::FormatNetworkSpeed(999ULL * 1024 * 1024).size() <= 5,
-          "network speed is bounded");
+    Check(monitor::FormatNetworkSpeed(9 * 1024) == L"9 KB/s", "network speed uses KB/s unit");
+    Check(monitor::FormatNetworkSpeed(12ULL * 1024 * 1024) == L"12.0 MB/s",
+          "network speed uses one decimal MB/s unit");
+    Check(monitor::FormatNetworkSpeed(2ULL * 1024 * 1024 * 1024) == L"2.0 GB/s",
+          "network speed uses GB/s unit");
 }
 
 void TestTemperatureDisplayFormatting() {
@@ -191,7 +189,7 @@ void TestCustomTaskbarFormat() {
           "custom CPU temperature variable is expanded");
     Check(layout.runs[3].value && layout.runs[3].text == L"37%",
           "custom CPU usage variable is expanded");
-    Check(layout.runs[5].row == 1 && layout.runs[5].text == L"12.0M",
+    Check(layout.runs[5].row == 1 && layout.runs[5].text == L"12.0 MB/s",
           "custom download variable uses second row");
     Check(layout.runs[1].stableText == L"100\u00B0",
           "custom format keeps stable width templates");
@@ -357,7 +355,7 @@ int main() {
     TestTemperatureConversion();
     TestIntelMsrTemperature();
     TestIntelRaplPower();
-    TestTaskbarBandLayoutIsStable();
+    TestTaskbarBandLayoutTracksValueWidth();
     TestTwoRowTaskbarLayout();
     TestCompactTaskbarBandLayout();
     TestNetworkSpeedUsesBoundedUnits();

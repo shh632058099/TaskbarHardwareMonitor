@@ -40,6 +40,14 @@ try {
 }
 
 function Resolve-CMake {
+    $savedPathFile = Join-Path $projectRoot '.cmake-path'
+    if (Test-Path -LiteralPath $savedPathFile) {
+        $savedPath = (Get-Content -LiteralPath $savedPathFile -Raw).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($savedPath) -and (Test-Path -LiteralPath $savedPath)) {
+            return $savedPath
+        }
+    }
+
     $command = Get-Command cmake.exe -ErrorAction SilentlyContinue
     if ($command) {
         return $command.Source

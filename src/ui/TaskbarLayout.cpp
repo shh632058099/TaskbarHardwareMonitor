@@ -17,8 +17,8 @@ struct LayoutWidths {
 
 LayoutWidths WidthsFor(DisplayMode mode) {
     return mode == DisplayMode::Compact
-        ? LayoutWidths{36, 40, 46, 42}
-        : LayoutWidths{60, 54, 52, 60};
+        ? LayoutWidths{36, 40, 0, 42}
+        : LayoutWidths{60, 54, 0, 60};
 }
 
 std::wstring Integer(double value) {
@@ -75,6 +75,10 @@ std::wstring BatterySuffix(std::uint32_t state, bool compact) {
 }
 void Add(TaskbarLayout& layout, int row, const wchar_t* label, std::wstring value, int width) {
     row = row == 1 ? 1 : 0;
+    if (width == 0) {
+        width = static_cast<int>(label ? std::wcslen(label) : 0) * 8 +
+                static_cast<int>(value.size()) * 8 + 12;
+    }
     layout.cells.push_back({label, std::move(value), width, row});
     layout.rowWidths[row] += width;
     layout.width = std::max(layout.rowWidths[0], layout.rowWidths[1]);
@@ -95,10 +99,10 @@ bool FormatVariable(const std::wstring& name, const SensorSnapshot& snapshot,
         stable = L"100\u00B0";
     } else if (name == L"down") {
         value = snapshot.networkValid ? FormatNetworkSpeed(snapshot.downloadBytesPerSecond) : L"--";
-        stable = L"99.9M";
+        stable = L"99.9 MB/s";
     } else if (name == L"up") {
         value = snapshot.networkValid ? FormatNetworkSpeed(snapshot.uploadBytesPerSecond) : L"--";
-        stable = L"99.9M";
+        stable = L"99.9 MB/s";
     } else if (name == L"power") {
         value = FormatPower(snapshot.cpuPower, snapshot.cpuPowerValid);
         stable = L"999W";
@@ -125,10 +129,10 @@ bool FormatVariable(const std::wstring& name, const SensorSnapshot& snapshot,
         stable = L"99.9G";
     } else if (name == L"disk_read") {
         value = snapshot.diskIoValid ? FormatNetworkSpeed(snapshot.diskReadBytesPerSecond) : L"--";
-        stable = L"99.9M";
+        stable = L"99.9 MB/s";
     } else if (name == L"disk_write") {
         value = snapshot.diskIoValid ? FormatNetworkSpeed(snapshot.diskWriteBytesPerSecond) : L"--";
-        stable = L"99.9M";
+        stable = L"99.9 MB/s";
     } else if (name == L"cpu_clock") {
         value = FormatClock(snapshot.cpuClockMHz, snapshot.cpuClockValid);
         stable = L"9.9G";
@@ -169,31 +173,13 @@ std::wstring FormatNetworkSpeed(std::uint64_t bytesPerSecond) {
     const double value = static_cast<double>(bytesPerSecond);
     stream << std::fixed;
     if (bytesPerSecond >= 1024ULL * 1024ULL * 1024ULL) {
-        stream << std::setprecision(1) << value / (1024.0 * 1024.0 * 1024.0) << L"G";
+        stream << std::setprecision(1) << value / (1024.0 * 1024.0 * 1024.0) << L" GB/s";
     } else if (bytesPerSecond >= 1024ULL * 1024ULL) {
-        stream << std::setprecision(1) << value / (1024.0 * 1024.0) << L"M";
+        stream << std::setprecision(1) << value / (1024.0 * 1024.0) << L" MB/s";
     } else {
-        stream << std::setprecision(0) << value / 1024.0 << L"K";
+        stream << std::setprecision(0) << value / 1024.0 << L" KB/s";
     }
-    auto result = stream.str();
-    if (result.size() <= 5) return result;
-    if (bytesPerSecond >= 1024ULL * 1024ULL) {
-        std::wstringstream compact;
-        compact << std::fixed << std::setprecision(1)
-                << (bytesPerSecond >= 1024ULL * 1024ULL * 1024ULL
-                    ? value / (1024.0 * 1024.0 * 1024.0)
-                    : value / (1024.0 * 1024.0))
-                << (bytesPerSecond >= 1024ULL * 1024ULL * 1024ULL ? L"G" : L"M");
-        result = compact.str();
-        if (result.size() > 5 && result.find(L".0") != std::wstring::npos) {
-            result.erase(result.find(L".0"), 2);
-        }
-    }
-    if (result.size() <= 5) return result;
-    if (result.size() > 1 && result[result.size() - 2] == L'.') {
-        result.erase(result.size() - 2, 2);
-    }
-    return result.size() > 5 ? result.substr(0, 5) : result;
+    return stream.str();
 }
 
 TaskbarLayout BuildTaskbarLayout(const SensorSnapshot& snapshot, const Config& config) {

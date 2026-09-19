@@ -133,21 +133,6 @@ int MeasureTextWidth(HDC dc, const std::wstring& text) {
     return size.cx;
 }
 
-std::wstring StableValueTemplate(const TaskbarCell& cell) {
-    if (cell.label == L"\u2193" || cell.label == L"\u2191" || cell.label == L"DR" ||
-        cell.label == L"DW" || cell.label == L"READ" || cell.label == L"WRITE") return L"99.9M";
-    if (cell.label == L"P" || cell.label == L"PWR" || cell.label == L"GP" ||
-        cell.label == L"GPWR" || cell.label == L"SYS") return L"999W";
-    if (cell.label == L"U" || cell.label == L"LOAD" || cell.label == L"R" ||
-        cell.label == L"RAM" || cell.label == L"GU" || cell.label == L"GLOAD" ||
-        cell.label == L"FAN") return L"100%";
-    if (cell.label == L"B") return L"100%+";
-    if (cell.label == L"BAT") return L"100% FULL";
-    if (cell.label == L"V" || cell.label == L"VRAM") return L"99.9/99.9G";
-    if (cell.label == L"F" || cell.label == L"CLK") return L"9.9G";
-    return L"100\u00B0";
-}
-
 bool IsDarkTaskbarTheme() {
     HKEY key = nullptr;
     const auto result = RegOpenKeyExW(
@@ -764,7 +749,7 @@ void TaskbarBand::Paint(HDC dc) {
     for (const auto& cell : layout.cells) {
         const int row = cell.row == 1 ? 1 : 0;
         const int labelWidth = MeasureTextWidth(buffer, cell.label);
-        const int valueWidth = MeasureTextWidth(buffer, StableValueTemplate(cell));
+        const int valueWidth = MeasureTextWidth(buffer, cell.value);
         measuredRowWidths[row] += labelWidth + labelValueGap + valueWidth;
         ++rowCellCounts[row];
     }
@@ -795,7 +780,7 @@ void TaskbarBand::Paint(HDC dc) {
         for (const auto& cell : layout.cells) {
             if (cell.row != row) continue;
             const int labelWidth = MeasureTextWidth(buffer, cell.label);
-            const int valueWidth = MeasureTextWidth(buffer, StableValueTemplate(cell));
+            const int valueWidth = MeasureTextWidth(buffer, cell.value);
             RECT label{x, top, x + labelWidth, bottom};
             RECT value{x + labelWidth + labelValueGap, top,
                        x + labelWidth + labelValueGap + valueWidth, bottom};
