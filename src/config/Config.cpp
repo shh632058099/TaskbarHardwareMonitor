@@ -58,6 +58,18 @@ bool HasTrue(const std::string& text, const char* key) {
     return text.find(std::string("\"") + key + "\": true") != std::string::npos;
 }
 
+bool LoadIntValue(const std::string& text, const char* key, long& result) {
+    const auto position = text.find(std::string("\"") + key + "\"");
+    if (position == std::string::npos) return false;
+    const auto colon = text.find(':', position);
+    if (colon == std::string::npos) return false;
+    char* end = nullptr;
+    const long value = std::strtol(text.c_str() + colon + 1, &end, 10);
+    if (end == text.c_str() + colon + 1) return false;
+    result = value;
+    return true;
+}
+
 void LoadStringValue(const std::string& text, const char* key, std::wstring& result) {
     const auto keyPosition = text.find(std::string("\"") + key + "\"");
     if (keyPosition == std::string::npos) return;
@@ -304,6 +316,7 @@ bool Config::Load() {
     showBattery = HasTrue(text, "show_battery");
     showSystemPower = HasTrue(text, "show_system_power");
     taskbarValueColorCustom = HasTrue(text, "value_color_custom");
+    thresholdColorsEnabled = HasTrue(text, "threshold_colors_enabled");
     const auto colorPosition = text.find("\"value_color\"");
     if (colorPosition != std::string::npos) {
         const auto colon = text.find(':', colorPosition);
@@ -312,6 +325,27 @@ bool Config::Load() {
             if (value <= 0x00FFFFFFul) taskbarValueColor = static_cast<unsigned int>(value);
         }
     }
+    long thresholdValue = 0;
+    if (LoadIntValue(text, "cpu_temp_warning", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 150)
+        cpuTempWarning = static_cast<int>(thresholdValue);
+    if (LoadIntValue(text, "cpu_temp_critical", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 150)
+        cpuTempCritical = static_cast<int>(thresholdValue);
+    if (LoadIntValue(text, "gpu_temp_warning", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 150)
+        gpuTempWarning = static_cast<int>(thresholdValue);
+    if (LoadIntValue(text, "gpu_temp_critical", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 150)
+        gpuTempCritical = static_cast<int>(thresholdValue);
+    if (LoadIntValue(text, "ram_warning", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 100)
+        ramWarning = static_cast<int>(thresholdValue);
+    if (LoadIntValue(text, "ram_critical", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 100)
+        ramCritical = static_cast<int>(thresholdValue);
+    if (LoadIntValue(text, "battery_warning", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 100)
+        batteryWarning = static_cast<int>(thresholdValue);
+    if (LoadIntValue(text, "battery_critical", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 100)
+        batteryCritical = static_cast<int>(thresholdValue);
+    if (LoadIntValue(text, "warning_color", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 0x00FFFFFFL)
+        warningColor = static_cast<unsigned int>(thresholdValue);
+    if (LoadIntValue(text, "critical_color", thresholdValue) && thresholdValue >= 0 && thresholdValue <= 0x00FFFFFFL)
+        criticalColor = static_cast<unsigned int>(thresholdValue);
     LoadStringValue(text, "network_adapter", networkAdapter);
     const auto storageDrivePosition = text.find("\"storage_drive\"");
     if (storageDrivePosition != std::string::npos) {
@@ -379,6 +413,17 @@ bool Config::Save() const {
          << ",\n    \"show_system_power\": " << (showSystemPower ? "true" : "false")
          << ",\n    \"value_color_custom\": " << (taskbarValueColorCustom ? "true" : "false")
          << ",\n    \"value_color\": " << taskbarValueColor
+         << ",\n    \"threshold_colors_enabled\": " << (thresholdColorsEnabled ? "true" : "false")
+         << ",\n    \"cpu_temp_warning\": " << cpuTempWarning
+         << ",\n    \"cpu_temp_critical\": " << cpuTempCritical
+         << ",\n    \"gpu_temp_warning\": " << gpuTempWarning
+         << ",\n    \"gpu_temp_critical\": " << gpuTempCritical
+         << ",\n    \"ram_warning\": " << ramWarning
+         << ",\n    \"ram_critical\": " << ramCritical
+         << ",\n    \"battery_warning\": " << batteryWarning
+         << ",\n    \"battery_critical\": " << batteryCritical
+         << ",\n    \"warning_color\": " << warningColor
+         << ",\n    \"critical_color\": " << criticalColor
          << ",\n    \"font_name\": \"" << fontName << "\""
          << ",\n    \"font_size\": " << taskbarFontSize
          << ",\n    \"font_weight\": " << taskbarFontWeight

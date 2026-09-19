@@ -13,6 +13,17 @@ struct Config {
     int taskbarRows = 1;
     bool taskbarValueColorCustom = false;
     unsigned int taskbarValueColor = 0x00F5F5F5u;
+    bool thresholdColorsEnabled = false;
+    int cpuTempWarning = 75;
+    int cpuTempCritical = 90;
+    int gpuTempWarning = 75;
+    int gpuTempCritical = 90;
+    int ramWarning = 85;
+    int ramCritical = 95;
+    int batteryWarning = 20;
+    int batteryCritical = 10;
+    unsigned int warningColor = 0x0000BEFFu;
+    unsigned int criticalColor = 0x005050FFu;
     std::wstring taskbarFontName = L"Segoe UI";
     int taskbarFontSize = 11;
     int taskbarFontWeight = 400;

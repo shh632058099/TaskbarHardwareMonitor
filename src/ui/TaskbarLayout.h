@@ -8,11 +8,13 @@
 #include <vector>
 
 namespace monitor {
+enum class AlertSeverity : std::uint8_t { Normal, Warning, Critical };
 struct TaskbarCell {
     std::wstring label;
     std::wstring value;
     int width = 0;
     int row = 0;
+    AlertSeverity severity = AlertSeverity::Normal;
 };
 struct TaskbarLayout {
     std::vector<TaskbarCell> cells;
@@ -26,6 +28,7 @@ struct TaskbarTextRun {
     bool value = false;
     int row = 0;
     int column = 0;
+    AlertSeverity severity = AlertSeverity::Normal;
 };
 struct TaskbarTextLayout {
     std::vector<TaskbarTextRun> runs;
@@ -37,6 +40,9 @@ std::wstring FormatTemperature(double value, bool valid);
 std::wstring FormatBattery(const SensorSnapshot&, bool compact = false);
 std::wstring FormatBatteryStatus(std::uint32_t state);
 TaskbarLayout BuildTaskbarLayout(const SensorSnapshot&, const Config&);
-TaskbarTextLayout BuildFormattedTaskbarLayout(const SensorSnapshot&, const std::wstring& format);
+TaskbarTextLayout BuildFormattedTaskbarLayout(const SensorSnapshot&, const std::wstring& format,
+                                               const Config* config = nullptr);
+AlertSeverity AlertSeverityForVariable(const std::wstring&, const SensorSnapshot&, const Config&);
+bool IsFormatVariableAvailable(const std::wstring&, const SensorSnapshot&);
 int TaskbarWidth(const Config&);
 }

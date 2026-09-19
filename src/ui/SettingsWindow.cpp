@@ -22,22 +22,27 @@ constexpr int FormatVariablesId = 321;
 constexpr int FormatResetId = 322;
 constexpr int HelpId = 323;
 constexpr int HelpCloseId = 324;
+constexpr int AlertSettingsId = 325;
+constexpr int AlertSaveId = 400;
+constexpr int AlertCancelId = 401;
+constexpr int AlertEnableId = 402;
+constexpr int WarningColorChooseId = 410;
+constexpr int CriticalColorChooseId = 411;
+constexpr int WarningColorPreviewId = 412;
+constexpr int CriticalColorPreviewId = 413;
 constexpr wchar_t FormatHintText[] =
-    L"Display format - 快捷说明\r\n"
-    L"Enter  = 直接换到任务栏第二行\r\n"
-    L"\\n     = 换到第二行（与 Enter 等价，适合写在单行格式中）\r\n"
-    L"\\t     = 开始下一列；上下两行相同列会自动对齐\r\n"
+    L"Display format 2.0 - 快捷说明\r\n"
+    L"Enter / \\n = 第二行    \\t = 下一对齐列\r\n"
     L"\r\n"
-    L"常用变量\r\n"
-    L"{cpu_temp} CPU温度   {cpu_usage} CPU占用   {cpu_clock} CPU频率\r\n"
-    L"{power} CPU功耗      {ram_usage} 内存占用  {ram_used} 已用内存\r\n"
-    L"{gpu_temp} GPU温度   {gpu_usage} GPU占用   {vram} 显存\r\n"
-    L"{disk_temp} 磁盘温度 {down} 下载           {up} 上传\r\n"
-    L"{battery} 电池+状态  {battery_status} 电池状态\r\n"
+    L"普通变量：{cpu_temp}  {cpu_usage}  {ram_usage}  {down}  {up}\r\n"
+    L"精度：{cpu_temp:1} -> 54.3°    {cpu_usage:1} -> 23.0%\r\n"
+    L"单位：{cpu_clock:ghz}  {ram_used:gb}  {down:mb}\r\n"
+    L"条件段：{gpu_temp?GPU:{gpu_temp}}\r\n"
+    L"        只有 GPU 温度有效时才显示整个 GPU 段\r\n"
     L"\r\n"
     L"示例：\r\n"
-    L"温度:{cpu_temp}\\t占用:{cpu_usage}\\t内存:{ram_usage}\r\n"
-    L"上行:{up}\\t下行:{down}\\t电池:{battery}";
+    L"CPU:{cpu_temp:1}\\tRAM:{ram_usage}\\t{gpu_temp?GPU:{gpu_temp}}\r\n"
+    L"↑:{up:mb}\\t↓:{down:mb}\\tBAT:{battery}";
 constexpr wchar_t BandSettingsPath[] = L"Software\\TaskbarHardwareMonitor\\TaskbarBand";
 constexpr wchar_t HelpText[] =
     L"Taskbar Hardware Monitor 帮助\r\n"
@@ -93,7 +98,23 @@ constexpr wchar_t HelpText[] =
     L"{battery}        电池百分比 + 简短状态\r\n"
     L"{battery_percent} 仅电池百分比\r\n"
     L"{battery_status}  完整电池状态文字\r\n"
-    L"{system_power}   电池放电时的整机功耗\r\n";
+    L"{system_power}   电池放电时的整机功耗\r\n"
+    L"\r\n"
+    L"【Display format 2.0】\r\n"
+    L"变量修饰符示例：\r\n"
+    L"{cpu_temp:1}      保留 1 位小数，例如 54.3°\r\n"
+    L"{cpu_usage:1}     保留 1 位小数\r\n"
+    L"{cpu_clock:ghz}   GHz 格式\r\n"
+    L"{cpu_clock:mhz}   MHz 格式\r\n"
+    L"{ram_used:gb}     强制 GB\r\n"
+    L"{down:kb|mb|gb}   强制网络速率单位\r\n"
+    L"条件段：{gpu_temp?GPU:{gpu_temp}}\r\n"
+    L"条件变量无有效数据时，整个条件段不显示。\r\n"
+    L"\r\n"
+    L"【Threshold alert colors】\r\n"
+    L"CPU/GPU 温度和 RAM 在达到 Warning/Critical 上限时变色。\r\n"
+    L"Battery 在低于 Warning/Critical 下限时变色。\r\n"
+    L"该功能默认关闭，可在 Settings -> Thresholds... 中开启。\r\n";
 
 constexpr COLORREF WindowBackground = RGB(32, 32, 32);
 constexpr COLORREF PanelBackground = RGB(45, 45, 45);
@@ -207,6 +228,32 @@ void SaveBandFormat(const std::wstring& format) {
     RegCloseKey(key);
 }
 
+void SaveBandAlertSettings(const Config& config) {
+    HKEY key = nullptr;
+    DWORD disposition = 0;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, BandSettingsPath, 0, nullptr,
+                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr,
+                        &key, &disposition) != ERROR_SUCCESS) {
+        return;
+    }
+    auto writeDword = [&](const wchar_t* name, DWORD value) {
+        RegSetValueExW(key, name, 0, REG_DWORD,
+                       reinterpret_cast<const BYTE*>(&value), sizeof(value));
+    };
+    writeDword(L"ThresholdColorsEnabled", config.thresholdColorsEnabled ? 1u : 0u);
+    writeDword(L"CpuTempWarning", static_cast<DWORD>(config.cpuTempWarning));
+    writeDword(L"CpuTempCritical", static_cast<DWORD>(config.cpuTempCritical));
+    writeDword(L"GpuTempWarning", static_cast<DWORD>(config.gpuTempWarning));
+    writeDword(L"GpuTempCritical", static_cast<DWORD>(config.gpuTempCritical));
+    writeDword(L"RamWarning", static_cast<DWORD>(config.ramWarning));
+    writeDword(L"RamCritical", static_cast<DWORD>(config.ramCritical));
+    writeDword(L"BatteryWarning", static_cast<DWORD>(config.batteryWarning));
+    writeDword(L"BatteryCritical", static_cast<DWORD>(config.batteryCritical));
+    writeDword(L"WarningColor", config.warningColor & 0x00FFFFFFu);
+    writeDword(L"CriticalColor", config.criticalColor & 0x00FFFFFFu);
+    RegCloseKey(key);
+}
+
 } // namespace
 
 bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
@@ -216,6 +263,17 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
     }
     config_ = config;
     owner_ = owner;
+    thresholdColorsEnabled_ = config_->thresholdColorsEnabled;
+    cpuTempWarning_ = config_->cpuTempWarning;
+    cpuTempCritical_ = config_->cpuTempCritical;
+    gpuTempWarning_ = config_->gpuTempWarning;
+    gpuTempCritical_ = config_->gpuTempCritical;
+    ramWarning_ = config_->ramWarning;
+    ramCritical_ = config_->ramCritical;
+    batteryWarning_ = config_->batteryWarning;
+    batteryCritical_ = config_->batteryCritical;
+    warningColor_ = static_cast<COLORREF>(config_->warningColor & 0x00FFFFFFu);
+    criticalColor_ = static_cast<COLORREF>(config_->criticalColor & 0x00FFFFFFu);
     WNDCLASSW windowClass{};
     windowClass.lpfnWndProc = Proc;
     windowClass.hInstance = instance;
@@ -274,6 +332,9 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
     CreateWindowW(L"BUTTON", L"Auto", WS_CHILD | WS_VISIBLE,
                   312, 235, 64, 26, hwnd_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(ValueColorAutoId)), instance, nullptr);
+    CreateWindowW(L"BUTTON", L"Thresholds...", WS_CHILD | WS_VISIBLE,
+                  390, 235, 110, 26, hwnd_,
+                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(AlertSettingsId)), instance, nullptr);
 
     ZeroMemory(&taskbarFont_, sizeof(taskbarFont_));
     taskbarFontSize_ = config_->taskbarFontSize;
@@ -406,6 +467,166 @@ void SettingsWindow::SetAutomaticValueColor() {
     if (valueColorPreview_) InvalidateRect(valueColorPreview_, nullptr, TRUE);
 }
 
+void SettingsWindow::ChooseWarningColor() {
+    static COLORREF customColors[16]{};
+    CHOOSECOLORW chooser{};
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = alertWindow_ ? alertWindow_ : hwnd_;
+    chooser.rgbResult = alertWarningColor_;
+    chooser.lpCustColors = customColors;
+    chooser.Flags = CC_FULLOPEN | CC_RGBINIT;
+    if (ChooseColorW(&chooser)) {
+        alertWarningColor_ = chooser.rgbResult;
+        if (warningColorPreview_) InvalidateRect(warningColorPreview_, nullptr, TRUE);
+    }
+}
+
+void SettingsWindow::ChooseCriticalColor() {
+    static COLORREF customColors[16]{};
+    CHOOSECOLORW chooser{};
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = alertWindow_ ? alertWindow_ : hwnd_;
+    chooser.rgbResult = alertCriticalColor_;
+    chooser.lpCustColors = customColors;
+    chooser.Flags = CC_FULLOPEN | CC_RGBINIT;
+    if (ChooseColorW(&chooser)) {
+        alertCriticalColor_ = chooser.rgbResult;
+        if (criticalColorPreview_) InvalidateRect(criticalColorPreview_, nullptr, TRUE);
+    }
+}
+
+void SettingsWindow::ShowThresholdSettings() {
+    if (alertWindow_ && IsWindow(alertWindow_)) {
+        ActivateSettingsWindow(alertWindow_);
+        return;
+    }
+
+    HINSTANCE instance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd_, GWLP_HINSTANCE));
+    WNDCLASSW alertClass{};
+    alertClass.lpfnWndProc = AlertProc;
+    alertClass.hInstance = instance;
+    alertClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    alertClass.hbrBackground = nullptr;
+    alertClass.lpszClassName = L"TaskbarHardwareMonitorThresholdWindow";
+    RegisterClassW(&alertClass);
+
+    alertWarningColor_ = warningColor_;
+    alertCriticalColor_ = criticalColor_;
+    alertWindow_ = CreateWindowExW(
+        WS_EX_DLGMODALFRAME, alertClass.lpszClassName, L"Threshold Alert Colors",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        CW_USEDEFAULT, CW_USEDEFAULT, 520, 410, hwnd_, nullptr, instance, this);
+    if (!alertWindow_) return;
+
+    alertEnabled_ = CreateWindowW(
+        L"BUTTON", L"Enable threshold warning / critical colors",
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 20, 18, 360, 22,
+        alertWindow_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(AlertEnableId)), instance, nullptr);
+    // Opening Thresholds... is an explicit intent to configure alert colors.
+    // Default the dialog to enabled so users do not save valid thresholds that never apply.
+    SendMessageW(alertEnabled_, BM_SETCHECK, BST_CHECKED, 0);
+
+    CreateWindowW(L"STATIC", L"Warning", WS_CHILD | WS_VISIBLE,
+                  245, 54, 80, 20, alertWindow_, nullptr, instance, nullptr);
+    CreateWindowW(L"STATIC", L"Critical", WS_CHILD | WS_VISIBLE,
+                  345, 54, 80, 20, alertWindow_, nullptr, instance, nullptr);
+
+    auto addThresholdRow = [&](const wchar_t* label, int y, int warning, int critical,
+                               HWND& warningEdit, HWND& criticalEdit) {
+        CreateWindowW(L"STATIC", label, WS_CHILD | WS_VISIBLE,
+                      20, y + 4, 190, 20, alertWindow_, nullptr, instance, nullptr);
+        warningEdit = CreateWindowW(L"EDIT", std::to_wstring(warning).c_str(),
+                                    WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+                                    240, y, 70, 24, alertWindow_, nullptr, instance, nullptr);
+        criticalEdit = CreateWindowW(L"EDIT", std::to_wstring(critical).c_str(),
+                                     WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+                                     340, y, 70, 24, alertWindow_, nullptr, instance, nullptr);
+    };
+    addThresholdRow(L"CPU temperature (°C, high)", 82, cpuTempWarning_, cpuTempCritical_, cpuWarning_, cpuCritical_);
+    addThresholdRow(L"GPU temperature (°C, high)", 116, gpuTempWarning_, gpuTempCritical_, gpuWarning_, gpuCritical_);
+    addThresholdRow(L"RAM usage (%, high)", 150, ramWarning_, ramCritical_, ramWarningEdit_, ramCriticalEdit_);
+    addThresholdRow(L"Battery (%, low)", 184, batteryWarning_, batteryCritical_, batteryWarningEdit_, batteryCriticalEdit_);
+
+    CreateWindowW(L"STATIC", L"For CPU/GPU/RAM, Critical must be above Warning. For Battery, Critical must be below Warning.",
+                  WS_CHILD | WS_VISIBLE | SS_LEFT,
+                  20, 220, 460, 38, alertWindow_, nullptr, instance, nullptr);
+
+    CreateWindowW(L"STATIC", L"Warning color:", WS_CHILD | WS_VISIBLE,
+                  20, 268, 110, 20, alertWindow_, nullptr, instance, nullptr);
+    warningColorPreview_ = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
+                                         132, 264, 34, 24, alertWindow_,
+                                         reinterpret_cast<HMENU>(static_cast<INT_PTR>(WarningColorPreviewId)),
+                                         instance, nullptr);
+    CreateWindowW(L"BUTTON", L"Choose...", WS_CHILD | WS_VISIBLE,
+                  176, 263, 82, 26, alertWindow_,
+                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(WarningColorChooseId)), instance, nullptr);
+
+    CreateWindowW(L"STATIC", L"Critical color:", WS_CHILD | WS_VISIBLE,
+                  280, 268, 100, 20, alertWindow_, nullptr, instance, nullptr);
+    criticalColorPreview_ = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
+                                          380, 264, 34, 24, alertWindow_,
+                                          reinterpret_cast<HMENU>(static_cast<INT_PTR>(CriticalColorPreviewId)),
+                                          instance, nullptr);
+    CreateWindowW(L"BUTTON", L"Choose...", WS_CHILD | WS_VISIBLE,
+                  424, 263, 72, 26, alertWindow_,
+                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(CriticalColorChooseId)), instance, nullptr);
+
+    CreateWindowW(L"BUTTON", L"Save", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                  330, 325, 75, 28, alertWindow_,
+                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(AlertSaveId)), instance, nullptr);
+    CreateWindowW(L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE,
+                  415, 325, 75, 28, alertWindow_,
+                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(AlertCancelId)), instance, nullptr);
+
+    ApplyTheme(alertWindow_, uiFont_);
+    EnableWindow(hwnd_, FALSE);
+    ActivateSettingsWindow(alertWindow_);
+}
+
+void SettingsWindow::SaveThresholdSettings() {
+    auto readValue = [](HWND edit) {
+        wchar_t text[16]{};
+        if (edit) GetWindowTextW(edit, text, _countof(text));
+        return _wtoi(text);
+    };
+
+    const int cpuWarning = readValue(cpuWarning_);
+    const int cpuCritical = readValue(cpuCritical_);
+    const int gpuWarning = readValue(gpuWarning_);
+    const int gpuCritical = readValue(gpuCritical_);
+    const int ramWarning = readValue(ramWarningEdit_);
+    const int ramCritical = readValue(ramCriticalEdit_);
+    const int batteryWarning = readValue(batteryWarningEdit_);
+    const int batteryCritical = readValue(batteryCriticalEdit_);
+
+    const bool valid = cpuWarning >= 0 && cpuCritical <= 150 && cpuWarning < cpuCritical &&
+                       gpuWarning >= 0 && gpuCritical <= 150 && gpuWarning < gpuCritical &&
+                       ramWarning >= 0 && ramCritical <= 100 && ramWarning < ramCritical &&
+                       batteryCritical >= 0 && batteryWarning <= 100 && batteryCritical < batteryWarning;
+    if (!valid) {
+        MessageBoxW(alertWindow_,
+                    L"Invalid thresholds.\n\n"
+                    L"CPU/GPU: 0..150 and Warning < Critical\n"
+                    L"RAM: 0..100 and Warning < Critical\n"
+                    L"Battery: 0..100 and Critical < Warning",
+                    L"Threshold settings", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    thresholdColorsEnabled_ = SendMessageW(alertEnabled_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    cpuTempWarning_ = cpuWarning;
+    cpuTempCritical_ = cpuCritical;
+    gpuTempWarning_ = gpuWarning;
+    gpuTempCritical_ = gpuCritical;
+    ramWarning_ = ramWarning;
+    ramCritical_ = ramCritical;
+    batteryWarning_ = batteryWarning;
+    batteryCritical_ = batteryCritical;
+    warningColor_ = alertWarningColor_;
+    criticalColor_ = alertCriticalColor_;
+    DestroyWindow(alertWindow_);
+}
+
 void SettingsWindow::UpdateFontDisplay() {
     if (!fontDisplay_) return;
     const int tenthsOfPoint = MulDiv(taskbarFontSize_, 720, 96);
@@ -506,6 +727,11 @@ void SettingsWindow::ShowFormatVariables() {
         L"Enter         Start the second taskbar row directly\n"
         L"\\n            Start the second row; same effect as Enter\n"
         L"\\t            Start the next aligned column; matching columns align across rows\n\n"
+        L"Format 2.0 modifiers:\n"
+        L"{cpu_temp:1} one decimal   {cpu_clock:ghz} GHz   {ram_used:gb} GB\n"
+        L"{down:kb|mb|gb} forced rate unit\n"
+        L"Conditional: {gpu_temp?GPU:{gpu_temp}}\n"
+        L"The body is hidden when the condition variable has no valid data.\n\n"
         L"Example:\n"
         L"温度:{cpu_temp}\\t占用:{cpu_usage}\\t内存:{ram_usage}\n"
         L"上行:{up}\\t下行:{down}\\t电池:{battery}\n\n"
@@ -520,7 +746,8 @@ void SettingsWindow::ShowFormatHint() {
     constexpr int hintWidth = 610;
     constexpr int hintHeight = 245;
     int left = edit.left;
-    int top = edit.bottom + 4;
+    // Prefer the area above the format editor so the hint never covers Preview.
+    int top = edit.top - hintHeight - 4;
 
     const HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
     MONITORINFO info{sizeof(info)};
@@ -529,8 +756,9 @@ void SettingsWindow::ShowFormatHint() {
             info.rcWork.left + 4,
             std::min<LONG>(static_cast<LONG>(left), info.rcWork.right - hintWidth - 4));
         left = static_cast<int>(clampedLeft);
-        if (top + hintHeight > info.rcWork.bottom - 4) {
-            top = edit.top - hintHeight - 4;
+        // Very small / top-edge work areas are the only case where we fall back below.
+        if (top < info.rcWork.top + 4) {
+            top = edit.bottom + 4;
         }
     }
     SetWindowPos(formatHint_, HWND_TOP, left, top, hintWidth, hintHeight,
@@ -663,6 +891,17 @@ void SettingsWindow::SaveAndClose() {
     updated.startWithWindows = SendMessageW(startup_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     updated.taskbarValueColorCustom = valueColorCustom_;
     updated.taskbarValueColor = static_cast<unsigned int>(valueColor_ & 0x00FFFFFFu);
+    updated.thresholdColorsEnabled = thresholdColorsEnabled_;
+    updated.cpuTempWarning = cpuTempWarning_;
+    updated.cpuTempCritical = cpuTempCritical_;
+    updated.gpuTempWarning = gpuTempWarning_;
+    updated.gpuTempCritical = gpuTempCritical_;
+    updated.ramWarning = ramWarning_;
+    updated.ramCritical = ramCritical_;
+    updated.batteryWarning = batteryWarning_;
+    updated.batteryCritical = batteryCritical_;
+    updated.warningColor = static_cast<unsigned int>(warningColor_ & 0x00FFFFFFu);
+    updated.criticalColor = static_cast<unsigned int>(criticalColor_ & 0x00FFFFFFu);
     updated.taskbarFontName = taskbarFont_.lfFaceName;
     updated.taskbarFontSize = taskbarFontSize_;
     updated.taskbarFontWeight = std::max(100L, std::min(900L, taskbarFont_.lfWeight));
@@ -673,6 +912,7 @@ void SettingsWindow::SaveAndClose() {
         ApplySensorDemandToMetrics(updated, SensorDemandFromFormat(updated.taskbarFormat));
     }
     SaveBandValueColor(valueColorCustom_, valueColor_);
+    SaveBandAlertSettings(updated);
     SaveBandFont(updated.taskbarFontName, updated.taskbarFontSize, updated.taskbarFontWeight);
     SaveBandFormat(updated.taskbarFormat);
     *config_ = updated;
@@ -686,6 +926,76 @@ void SettingsWindow::SaveAndClose() {
     }
     if (owner_) PostMessageW(owner_, WM_APP + 3, 0, 0);
     DestroyWindow(hwnd_);
+}
+
+LRESULT CALLBACK SettingsWindow::AlertProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    auto* self = reinterpret_cast<SettingsWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+        auto* create = reinterpret_cast<CREATESTRUCTW*>(lParam);
+        self = reinterpret_cast<SettingsWindow*>(create->lpCreateParams);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    }
+    if (self && message == WM_COMMAND) {
+        switch (LOWORD(wParam)) {
+        case AlertSaveId: self->SaveThresholdSettings(); return 0;
+        case AlertCancelId: DestroyWindow(window); return 0;
+        case WarningColorChooseId: self->ChooseWarningColor(); return 0;
+        case CriticalColorChooseId: self->ChooseCriticalColor(); return 0;
+        default: break;
+        }
+    }
+    if (self && message == WM_DRAWITEM) {
+        const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+        if (draw && (draw->CtlID == WarningColorPreviewId || draw->CtlID == CriticalColorPreviewId)) {
+            const COLORREF color = draw->CtlID == WarningColorPreviewId
+                ? self->alertWarningColor_ : self->alertCriticalColor_;
+            HBRUSH fill = CreateSolidBrush(color);
+            FillRect(draw->hDC, &draw->rcItem, fill);
+            DeleteObject(fill);
+            FrameRect(draw->hDC, &draw->rcItem,
+                      reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
+            return TRUE;
+        }
+    }
+    if (message == WM_CTLCOLORSTATIC || message == WM_CTLCOLOREDIT || message == WM_CTLCOLORBTN) {
+        const HDC dc = reinterpret_cast<HDC>(wParam);
+        SetTextColor(dc, TextColor);
+        SetBkColor(dc, PanelBackground);
+        static HBRUSH brush = CreateSolidBrush(PanelBackground);
+        return reinterpret_cast<LRESULT>(brush);
+    }
+    if (message == WM_ERASEBKGND) {
+        const HDC dc = reinterpret_cast<HDC>(wParam);
+        RECT client{};
+        GetClientRect(window, &client);
+        static HBRUSH brush = CreateSolidBrush(WindowBackground);
+        FillRect(dc, &client, brush);
+        return 1;
+    }
+    if (message == WM_CLOSE) {
+        DestroyWindow(window);
+        return 0;
+    }
+    if (message == WM_DESTROY && self) {
+        if (self->alertWindow_ == window) self->alertWindow_ = nullptr;
+        self->alertEnabled_ = nullptr;
+        self->cpuWarning_ = nullptr;
+        self->cpuCritical_ = nullptr;
+        self->gpuWarning_ = nullptr;
+        self->gpuCritical_ = nullptr;
+        self->ramWarningEdit_ = nullptr;
+        self->ramCriticalEdit_ = nullptr;
+        self->batteryWarningEdit_ = nullptr;
+        self->batteryCriticalEdit_ = nullptr;
+        self->warningColorPreview_ = nullptr;
+        self->criticalColorPreview_ = nullptr;
+        if (self->hwnd_ && IsWindow(self->hwnd_)) {
+            EnableWindow(self->hwnd_, TRUE);
+            ActivateSettingsWindow(self->hwnd_);
+        }
+        return 0;
+    }
+    return DefWindowProcW(window, message, wParam, lParam);
 }
 
 LRESULT CALLBACK SettingsWindow::HelpProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -737,6 +1047,7 @@ LRESULT CALLBACK SettingsWindow::Proc(HWND window, UINT message, WPARAM wParam, 
         if (LOWORD(wParam) == CloseId) DestroyWindow(window);
         if (LOWORD(wParam) == ValueColorChooseId) self->ChooseValueColor();
         if (LOWORD(wParam) == ValueColorAutoId) self->SetAutomaticValueColor();
+        if (LOWORD(wParam) == AlertSettingsId) self->ShowThresholdSettings();
         if (LOWORD(wParam) == FontChooseId) self->ChooseTaskbarFont();
         if (LOWORD(wParam) == FormatVariablesId) self->ShowFormatVariables();
         if (LOWORD(wParam) == FormatResetId) self->ResetTaskbarFormat();
@@ -788,6 +1099,8 @@ LRESULT CALLBACK SettingsWindow::Proc(HWND window, UINT message, WPARAM wParam, 
         return 0;
     }
     if (message == WM_DESTROY && self) {
+        if (self->alertWindow_ && IsWindow(self->alertWindow_)) DestroyWindow(self->alertWindow_);
+        self->alertWindow_ = nullptr;
         if (self->helpWindow_ && IsWindow(self->helpWindow_)) DestroyWindow(self->helpWindow_);
         self->helpWindow_ = nullptr;
         if (self->formatHint_) DestroyWindow(self->formatHint_);

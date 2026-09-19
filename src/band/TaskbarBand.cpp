@@ -272,6 +272,33 @@ COLORREF LoadValueColor(bool darkTheme) {
         ? static_cast<COLORREF>(color & 0x00FFFFFFu)
         : automatic;
 }
+
+void LoadAlertSettings(Config& config) {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, BandSettingsPath, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
+        return;
+    }
+    auto readDword = [&](const wchar_t* name, DWORD& value) {
+        DWORD type = 0;
+        DWORD size = sizeof(value);
+        return RegQueryValueExW(key, name, nullptr, &type,
+                                reinterpret_cast<BYTE*>(&value), &size) == ERROR_SUCCESS &&
+               type == REG_DWORD;
+    };
+    DWORD value = 0;
+    if (readDword(L"ThresholdColorsEnabled", value)) config.thresholdColorsEnabled = value != 0;
+    if (readDword(L"CpuTempWarning", value) && value <= 150) config.cpuTempWarning = static_cast<int>(value);
+    if (readDword(L"CpuTempCritical", value) && value <= 150) config.cpuTempCritical = static_cast<int>(value);
+    if (readDword(L"GpuTempWarning", value) && value <= 150) config.gpuTempWarning = static_cast<int>(value);
+    if (readDword(L"GpuTempCritical", value) && value <= 150) config.gpuTempCritical = static_cast<int>(value);
+    if (readDword(L"RamWarning", value) && value <= 100) config.ramWarning = static_cast<int>(value);
+    if (readDword(L"RamCritical", value) && value <= 100) config.ramCritical = static_cast<int>(value);
+    if (readDword(L"BatteryWarning", value) && value <= 100) config.batteryWarning = static_cast<int>(value);
+    if (readDword(L"BatteryCritical", value) && value <= 100) config.batteryCritical = static_cast<int>(value);
+    if (readDword(L"WarningColor", value)) config.warningColor = value & 0x00FFFFFFu;
+    if (readDword(L"CriticalColor", value)) config.criticalColor = value & 0x00FFFFFFu;
+    RegCloseKey(key);
+}
 }
 
 TaskbarBand::TaskbarBand() { ModuleAddObject(); }
@@ -642,6 +669,7 @@ void TaskbarBand::Paint(HDC dc) {
         config.showPower = true;
     }
     config.taskbarRows = LoadLayoutRows();
+    LoadAlertSettings(config);
     const std::wstring customFormat = LoadFormatTemplate();
     if (!config.taskbarEnabled) {
         ShowWindow(hwnd_, SW_HIDE);
@@ -654,7 +682,7 @@ void TaskbarBand::Paint(HDC dc) {
     }
     ShowWindow(hwnd_, SW_SHOW);
     if (!customFormat.empty()) {
-        const auto formatted = BuildFormattedTaskbarLayout(snapshot, customFormat);
+        const auto formatted = BuildFormattedTaskbarLayout(snapshot, customFormat, &config);
         constexpr int outerPadding = 2;
         constexpr int columnGap = 10;
         int measuredRowWidths[2]{};
@@ -708,7 +736,12 @@ void TaskbarBand::Paint(HDC dc) {
                         if (run.row != row || run.column != column) continue;
                         const int runWidth = MeasureTextWidth(buffer, run.stableText);
                         RECT rect{runX, top, runX + runWidth, bottom};
-                        SetTextColor(buffer, run.value ? valueColor : labelColor);
+                        COLORREF runColor = run.value ? valueColor : labelColor;
+                        if (run.value && run.severity == AlertSeverity::Warning)
+                            runColor = static_cast<COLORREF>(config.warningColor);
+                        else if (run.value && run.severity == AlertSeverity::Critical)
+                            runColor = static_cast<COLORREF>(config.criticalColor);
+                        SetTextColor(buffer, runColor);
                         DrawTextW(buffer, run.text.c_str(), -1, &rect,
                                   DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
                         runX += runWidth;
@@ -722,7 +755,12 @@ void TaskbarBand::Paint(HDC dc) {
                     if (run.row != row) continue;
                     const int runWidth = MeasureTextWidth(buffer, run.stableText);
                     RECT rect{x, top, x + runWidth, bottom};
-                    SetTextColor(buffer, run.value ? valueColor : labelColor);
+                    COLORREF runColor = run.value ? valueColor : labelColor;
+                    if (run.value && run.severity == AlertSeverity::Warning)
+                        runColor = static_cast<COLORREF>(config.warningColor);
+                    else if (run.value && run.severity == AlertSeverity::Critical)
+                        runColor = static_cast<COLORREF>(config.criticalColor);
+                    SetTextColor(buffer, runColor);
                     DrawTextW(buffer, run.text.c_str(), -1, &rect,
                               DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
                     x += runWidth;
@@ -785,7 +823,12 @@ void TaskbarBand::Paint(HDC dc) {
             SetTextColor(buffer, labelColor);
             DrawTextW(buffer, cell.label.c_str(), -1, &label,
                       DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
-            SetTextColor(buffer, valueColor);
+            COLORREF cellValueColor = valueColor;
+            if (cell.severity == AlertSeverity::Warning)
+                cellValueColor = static_cast<COLORREF>(config.warningColor);
+            else if (cell.severity == AlertSeverity::Critical)
+                cellValueColor = static_cast<COLORREF>(config.criticalColor);
+            SetTextColor(buffer, cellValueColor);
             DrawTextW(buffer, cell.value.c_str(), -1, &value,
                       DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
             x += labelWidth + labelValueGap + valueWidth;

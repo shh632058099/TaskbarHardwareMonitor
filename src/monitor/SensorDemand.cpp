@@ -1,9 +1,22 @@
 #include "SensorDemand.h"
+#include <cwctype>
+#include <functional>
 
 namespace monitor {
 namespace {
 
-std::uint32_t DemandForVariable(const std::wstring& name) {
+std::wstring BaseVariable(std::wstring name) {
+    const auto question = name.find(L'?');
+    if (question != std::wstring::npos) name.resize(question);
+    const auto colon = name.find(L':');
+    if (colon != std::wstring::npos) name.resize(colon);
+    while (!name.empty() && iswspace(name.front())) name.erase(name.begin());
+    while (!name.empty() && iswspace(name.back())) name.pop_back();
+    return name;
+}
+
+std::uint32_t DemandForVariable(const std::wstring& spec) {
+    const auto name = BaseVariable(spec);
     if (name == L"cpu_temp") return DemandCpuTemperature;
     if (name == L"cpu_usage") return DemandCpuUsage;
     if (name == L"gpu_temp") return DemandGpuTemperature;
@@ -20,6 +33,25 @@ std::uint32_t DemandForVariable(const std::wstring& name) {
     if (name == L"battery" || name == L"battery_percent" || name == L"battery_status") return DemandBattery;
     if (name == L"system_power") return DemandSystemPower;
     return 0;
+}
+
+std::size_t FindMatchingBrace(const std::wstring& text, std::size_t start) {
+    int depth = 0;
+    for (std::size_t index = start; index < text.size(); ++index) {
+        if (text[index] == L'{') ++depth;
+        else if (text[index] == L'}' && --depth == 0) return index;
+    }
+    return std::wstring::npos;
+}
+
+std::size_t FindTopLevelQuestion(const std::wstring& expression) {
+    int depth = 0;
+    for (std::size_t index = 0; index < expression.size(); ++index) {
+        if (expression[index] == L'{') ++depth;
+        else if (expression[index] == L'}') --depth;
+        else if (expression[index] == L'?' && depth == 0) return index;
+    }
+    return std::wstring::npos;
 }
 
 } // namespace
@@ -55,16 +87,27 @@ std::uint32_t SensorDemandFromMetrics(const Config& config) {
 
 std::uint32_t SensorDemandFromFormat(const std::wstring& format) {
     std::uint32_t demand = 0;
-    for (std::size_t index = 0; index < format.size();) {
-        if (format[index] != L'{') {
-            ++index;
-            continue;
+    std::function<void(const std::wstring&)> scan;
+    scan = [&](const std::wstring& text) {
+        for (std::size_t index = 0; index < text.size();) {
+            if (text[index] != L'{') {
+                ++index;
+                continue;
+            }
+            const auto end = FindMatchingBrace(text, index);
+            if (end == std::wstring::npos) break;
+            const auto expression = text.substr(index + 1, end - index - 1);
+            const auto question = FindTopLevelQuestion(expression);
+            if (question != std::wstring::npos) {
+                demand |= DemandForVariable(expression.substr(0, question));
+                scan(expression.substr(question + 1));
+            } else {
+                demand |= DemandForVariable(expression);
+            }
+            index = end + 1;
         }
-        const auto end = format.find(L'}', index + 1);
-        if (end == std::wstring::npos) break;
-        demand |= DemandForVariable(format.substr(index + 1, end - index - 1));
-        index = end + 1;
-    }
+    };
+    scan(format);
     return demand;
 }
 

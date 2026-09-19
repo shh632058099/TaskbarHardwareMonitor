@@ -182,6 +182,7 @@ void TestTaskbarConfigurationDefaults() {
           "taskbar uses full mode by default");
     Check(config.taskbarRows == 1, "taskbar uses one row by default");
     Check(config.taskbarFormat.empty(), "custom taskbar format is disabled by default");
+    Check(!config.thresholdColorsEnabled, "threshold alert colors are disabled by default");
     Check(config.storageDriveIndex == -1, "storage temperature source uses auto selection by default");
     Check(config.showCpuTemperature && config.showGpuTemperature &&
               config.showDiskTemperature && config.showNetwork && config.showPower,
@@ -241,6 +242,93 @@ void TestCustomTaskbarColumns() {
         if (run.column == 2) sawThirdColumn = true;
     }
     Check(sawSecondColumn && sawThirdColumn, "runs retain aligned column metadata");
+}
+
+void TestDisplayFormat2ModifiersAndConditions() {
+    monitor::SensorSnapshot snapshot;
+    snapshot.cpuTemperature = 54.26;
+    snapshot.cpuTemperatureValid = true;
+    snapshot.cpuClockMHz = 3400.0;
+    snapshot.cpuClockValid = true;
+    snapshot.memoryUsedBytes = 12ULL * 1024ULL * 1024ULL * 1024ULL;
+    snapshot.memoryTotalBytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
+    snapshot.memoryUsage = 75.0;
+    snapshot.memoryValid = true;
+    snapshot.downloadBytesPerSecond = 12ULL * 1024ULL * 1024ULL;
+    snapshot.networkValid = true;
+
+    const auto modifiers = monitor::BuildFormattedTaskbarLayout(
+        snapshot, L"{cpu_temp:1}|{cpu_clock:ghz}|{ram_used:gb}|{down:mb}");
+    Check(modifiers.runs.size() == 7, "format 2.0 modifiers preserve separators");
+    Check(modifiers.runs[0].text == L"54.3\u00B0", "temperature modifier keeps one decimal");
+    Check(modifiers.runs[2].text == L"3.4 GHz", "clock ghz modifier formats units");
+    Check(modifiers.runs[4].text == L"12.0 GB", "memory gb modifier formats units");
+    Check(modifiers.runs[6].text == L"12.0 MB/s", "network mb modifier formats units");
+
+    const auto hidden = monitor::BuildFormattedTaskbarLayout(
+        snapshot, L"A{gpu_temp? GPU:{gpu_temp}}B");
+    std::wstring hiddenText;
+    for (const auto& run : hidden.runs) hiddenText += run.text;
+    Check(hiddenText == L"AB", "conditional segment is hidden when sensor data is unavailable");
+
+    snapshot.gpuTemperature = 47.0;
+    snapshot.gpuTemperatureValid = true;
+    const auto shown = monitor::BuildFormattedTaskbarLayout(
+        snapshot, L"A{gpu_temp? GPU:{gpu_temp}}B");
+    std::wstring shownText;
+    for (const auto& run : shown.runs) shownText += run.text;
+    Check(shownText == L"A GPU:47\u00B0B", "conditional segment renders nested variables when available");
+
+    const auto demand = monitor::SensorDemandFromFormat(
+        L"{gpu_temp?GPU:{gpu_temp}} {down:mb}");
+    Check((demand & monitor::DemandGpuTemperature) != 0 &&
+          (demand & monitor::DemandNetwork) != 0,
+          "format 2.0 conditions and modifiers keep sensor demand accurate");
+}
+
+void TestThresholdAlertSeverity() {
+    monitor::Config config;
+    config.thresholdColorsEnabled = true;
+    config.cpuTempWarning = 75;
+    config.cpuTempCritical = 90;
+    config.gpuTempWarning = 75;
+    config.gpuTempCritical = 90;
+    config.ramWarning = 85;
+    config.ramCritical = 95;
+    config.batteryWarning = 20;
+    config.batteryCritical = 10;
+
+    monitor::SensorSnapshot snapshot;
+    snapshot.cpuTemperatureValid = true;
+    snapshot.cpuTemperature = 80.0;
+    Check(monitor::AlertSeverityForVariable(L"cpu_temp", snapshot, config) ==
+              monitor::AlertSeverity::Warning,
+          "CPU temperature enters warning severity");
+    snapshot.cpuTemperature = 95.0;
+    Check(monitor::AlertSeverityForVariable(L"cpu_temp:1", snapshot, config) ==
+              monitor::AlertSeverity::Critical,
+          "threshold severity ignores format modifier and reaches critical");
+
+    snapshot.memoryValid = true;
+    snapshot.memoryUsage = 90.0;
+    Check(monitor::AlertSeverityForVariable(L"ram_used:gb", snapshot, config) ==
+              monitor::AlertSeverity::Warning,
+          "RAM byte variables use RAM usage threshold");
+
+    snapshot.batteryValid = true;
+    snapshot.batteryPercent = 8.0;
+    Check(monitor::AlertSeverityForVariable(L"battery", snapshot, config) ==
+              monitor::AlertSeverity::Critical,
+          "low battery uses reversed critical threshold");
+
+    const auto formatted = monitor::BuildFormattedTaskbarLayout(snapshot, L"{battery}", &config);
+    Check(!formatted.runs.empty() && formatted.runs[0].severity == monitor::AlertSeverity::Critical,
+          "custom format carries threshold severity into text runs");
+
+    config.thresholdColorsEnabled = false;
+    Check(monitor::AlertSeverityForVariable(L"battery", snapshot, config) ==
+              monitor::AlertSeverity::Normal,
+          "disabled threshold colors preserve normal severity");
 }
 
 void TestBatteryFormatting() {
@@ -383,6 +471,8 @@ int main() {
     TestTaskbarConfigurationDefaults();
     TestCustomTaskbarFormat();
     TestCustomTaskbarColumns();
+    TestDisplayFormat2ModifiersAndConditions();
+    TestThresholdAlertSeverity();
     TestBatteryFormatting();
     TestUnicodeUiText();
     TestSensorDemandSelection();

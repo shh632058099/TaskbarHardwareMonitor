@@ -13,6 +13,8 @@
 - 按需采集：没有显示的指标不会后台查询硬件。
 - `Collection interval (ms)` 就是真实传感器采集周期。
 - 支持任务栏标签色、数值色、字体、字号等配置。
+- 支持 CPU/GPU 温度、RAM、电池阈值 Warning / Critical 自动变色。
+- Display format 2.0 支持精度/单位修饰符与条件段。
 - 支持 Windows 深色 / 浅色任务栏。
 - 支持高权限开机启动，并自动维护启动路径。
 - Explorer 早于 Monitor 启动时，DeskBand 会先隐藏，第一份有效数据到达后再显示。
@@ -146,6 +148,43 @@ Enter   直接换到任务栏第二行
 温度:{cpu_temp}\t占用:{cpu_usage}\t内存:{ram_usage}
 上行:{up}\t下行:{down}\t电池:{battery}
 ```
+
+### Display format 2.0
+
+旧格式完全兼容，并新增变量修饰符：
+
+```text
+{cpu_temp:1}       54.3°
+{cpu_usage:1}      23.0%
+{cpu_clock:ghz}    3.4 GHz
+{cpu_clock:mhz}    3400 MHz
+{ram_used:gb}      12.0 GB
+{down:mb}          12.4 MB/s
+{up:kb}            320 KB/s
+```
+
+速率变量 `down` / `up` / `disk_read` / `disk_write` 支持 `kb`、`mb`、`gb`；内存/显存容量变量支持 `mb`、`gb`。
+
+条件段语法：
+
+```text
+{gpu_temp?GPU:{gpu_temp}}
+```
+
+只有条件变量当前有有效数据时才渲染 `?` 后的内容。条件段内部可以继续使用普通变量，例如同一个配置复制到没有 NVIDIA GPU 的机器时，可以自动隐藏 GPU 段，而不是显示 `GPU:--`。条件变量和内部变量都会自动加入按需采集 demand。
+
+### Threshold alert colors
+
+Settings 中点击 `Thresholds...` 可以配置视觉告警。功能默认关闭，开启后只改变对应**数值**颜色，不改变标签颜色：
+
+```text
+CPU temperature    >= Warning / Critical
+GPU temperature    >= Warning / Critical
+RAM usage          >= Warning / Critical
+Battery            <= Warning / Critical
+```
+
+默认阈值：CPU 75/90°C、GPU 75/90°C、RAM 85/95%、Battery 20/10%。Warning 和 Critical 颜色均可自定义。阈值颜色同时作用于默认 Full/Compact 布局和 Display format 2.0。
 
 ## 开机启动
 
