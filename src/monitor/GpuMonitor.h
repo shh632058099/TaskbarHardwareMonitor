@@ -1,13 +1,14 @@
 #pragma once
 #include "SensorTypes.h"
 #include "SensorDemand.h"
+#include "GpuProvider.h"
 #include <cstdint>
 
 namespace monitor {
-class GpuMonitor {
+class GpuMonitor : public IGpuProvider {
 public:
     ~GpuMonitor();
-    void Update(SensorSnapshot& snapshot, std::uint32_t demand);
+    void Update(SensorSnapshot& snapshot, std::uint32_t demand) override;
 private:
     void Initialize();
     void* module_ = nullptr;

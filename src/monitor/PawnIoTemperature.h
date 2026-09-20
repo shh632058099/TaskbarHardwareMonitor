@@ -11,6 +11,7 @@ public:
 
     bool ReadPackageTemperature(double& celsius);
     bool ReadPackagePower(double& watts);
+    void ResetPowerSampling() { powerInitialized_ = false; lastPowerTick_ = 0; }
 
 private:
     bool InstallPawnIo();

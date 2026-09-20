@@ -23,6 +23,28 @@ add_executable(TaskbarHardwareMonitor WIN32
     src/monitor/CpuMonitor.h
     src/monitor/CpuTemperature.cpp
     src/monitor/CpuTemperature.h
+    src/monitor/TemperatureProvider.cpp
+    src/monitor/TemperatureProvider.h
+    src/monitor/PowerProvider.cpp
+    src/monitor/PowerProvider.h
+    src/monitor/WmiTemperatureProvider.cpp
+    src/monitor/WmiTemperatureProvider.h
+    src/hardware/HardwareAccess.h
+    src/hardware/CpuVendor.cpp
+    src/hardware/CpuVendor.h
+    src/hardware/bus/PciAccess.cpp
+    src/hardware/bus/PciAccess.h
+    src/hardware/amd/AmdTemperature.cpp
+    src/hardware/amd/AmdTemperature.h
+    src/hardware/amd/AmdCpuIdentity.cpp
+    src/hardware/Sensor.h
+    src/hardware/SensorRegistry.cpp
+    src/hardware/SensorRegistry.h
+    src/monitor/SnapshotSensorProvider.cpp
+    src/monitor/SnapshotSensorProvider.h
+    src/monitor/GpuProvider.h
+    src/monitor/StorageProvider.h
+    src/monitor/NetworkProvider.h
     src/monitor/PawnIoTemperature.cpp
     src/monitor/PawnIoTemperature.h
     src/monitor/NetworkMonitor.cpp
@@ -95,6 +117,27 @@ if(BUILD_UNIT_TESTS)
         tests/TestMain.cpp
         src/monitor/CpuTemperature.cpp
         src/monitor/CpuTemperature.h
+        src/monitor/TemperatureProvider.cpp
+        src/monitor/TemperatureProvider.h
+        src/monitor/PowerProvider.cpp
+        src/monitor/PowerProvider.h
+        src/monitor/WmiTemperatureProvider.cpp
+        src/monitor/WmiTemperatureProvider.h
+        src/hardware/CpuVendor.cpp
+        src/hardware/CpuVendor.h
+        src/hardware/bus/PciAccess.cpp
+        src/hardware/bus/PciAccess.h
+        src/hardware/amd/AmdTemperature.cpp
+        src/hardware/amd/AmdTemperature.h
+        src/hardware/amd/AmdCpuIdentity.cpp
+        src/hardware/Sensor.h
+        src/hardware/SensorRegistry.cpp
+        src/hardware/SensorRegistry.h
+        src/monitor/SnapshotSensorProvider.cpp
+        src/monitor/SnapshotSensorProvider.h
+        src/monitor/GpuProvider.h
+        src/monitor/StorageProvider.h
+        src/monitor/NetworkProvider.h
         src/monitor/PawnIoTemperature.cpp
         src/monitor/PawnIoTemperature.h
         src/ui/TaskbarLayout.cpp
@@ -107,6 +150,6 @@ if(BUILD_UNIT_TESTS)
         src/ipc/SharedSensorSnapshot.h
     )
     target_compile_definitions(TaskbarHardwareMonitorTests PRIVATE UNICODE _UNICODE NOMINMAX)
-    target_link_libraries(TaskbarHardwareMonitorTests PRIVATE advapi32 taskschd ole32 oleaut32)
+    target_link_libraries(TaskbarHardwareMonitorTests PRIVATE advapi32 taskschd ole32 oleaut32 wbemuuid)
     add_test(NAME TaskbarHardwareMonitorTests COMMAND TaskbarHardwareMonitorTests)
 endif()

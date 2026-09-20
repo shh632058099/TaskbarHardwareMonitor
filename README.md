@@ -72,6 +72,8 @@ start-monitor.cmd             便携版启动入口
 | Battery | `GetSystemPowerStatus` | 电量和状态 |
 | System Power | Battery discharge state | 仅电池放电场景有意义 |
 
+传感器后端已使用可替换 Provider 抽象：Intel CPU 温度优先使用 PawnIO/MSR，失败时回退 WMI/ACPI。代码中包含 AMD CPU 身份识别、温度解码和显式 PCI 映射 Provider；当前发行版不提供未经实机验证的 AMD 寄存器映射，因此 AMD 系统安全地仅使用 WMI/ACPI 回退，不宣称直接 AMD 温度支持。
+
 读取失败或当前硬件不支持的指标显示为 `--`。
 
 ## Collection interval 与按需采集

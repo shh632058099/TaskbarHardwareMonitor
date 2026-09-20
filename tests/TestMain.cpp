@@ -1,6 +1,12 @@
 #include "../src/config/Config.h"
 #include "../src/monitor/CpuTemperature.h"
 #include "../src/monitor/PawnIoTemperature.h"
+#include "../src/monitor/TemperatureProvider.h"
+#include "../src/monitor/PowerProvider.h"
+#include "../src/hardware/amd/AmdTemperature.h"
+#include "../src/hardware/SensorRegistry.h"
+#include "../src/monitor/SnapshotSensorProvider.h"
+#include "../src/monitor/WmiTemperatureProvider.h"
 #include "../src/monitor/SensorTypes.h"
 #include "../src/monitor/SensorDemand.h"
 #include "../src/ui/TaskbarLayout.h"
@@ -20,6 +26,193 @@ void Check(bool condition, const char* expression) {
         std::cerr << "FAIL: " << expression << '\n';
         ++failures;
     }
+}
+
+class FakeTemperatureProvider final : public monitor::ITemperatureProvider {
+public:
+    FakeTemperatureProvider(bool succeeds, double celsius)
+        : succeeds_(succeeds), celsius_(celsius) {}
+
+    bool ReadPackageTemperature(double& celsius) override {
+        ++calls;
+        if (!succeeds_) return false;
+        celsius = celsius_;
+        return true;
+    }
+
+    int calls = 0;
+
+private:
+    bool succeeds_;
+    double celsius_;
+};
+
+class FakePowerProvider final : public monitor::IPowerProvider {
+public:
+    bool ReadPackagePower(std::uint64_t nowMilliseconds, double& watts) override {
+        lastNowMilliseconds = nowMilliseconds;
+        watts = 42.5;
+        return true;
+    }
+
+    void Reset() override { reset = true; }
+
+    std::uint64_t lastNowMilliseconds = 0;
+    bool reset = false;
+};
+
+void TestProviderFallbacks() {
+    double celsius = 0.0;
+    FakeTemperatureProvider primary(true, 51.5);
+    FakeTemperatureProvider fallback(true, 47.0);
+    monitor::TemperatureManager temperature(primary, fallback);
+    Check(temperature.ReadPackageTemperature(celsius) && std::abs(celsius - 51.5) < 0.01,
+          "temperature manager returns the primary provider result");
+    Check(primary.calls == 1 && fallback.calls == 0,
+          "temperature manager does not call fallback after a primary success");
+
+    FakeTemperatureProvider unavailable(false, 0.0);
+    monitor::TemperatureManager fallbackTemperature(unavailable, fallback);
+    Check(fallbackTemperature.ReadPackageTemperature(celsius) && std::abs(celsius - 47.0) < 0.01,
+          "temperature manager returns fallback after primary failure");
+
+    FakePowerProvider powerProvider;
+    monitor::PowerManager power(powerProvider);
+    double watts = 0.0;
+    Check(power.ReadPackagePower(1234, watts) && std::abs(watts - 42.5) < 0.01,
+          "power manager returns the configured provider result");
+    Check(powerProvider.lastNowMilliseconds == 1234,
+          "power manager forwards the collection timestamp");
+    power.Reset();
+    Check(powerProvider.reset, "power manager resets its provider");
+}
+
+class FakeHardwareAccess final : public monitor::IHardwareAccess {
+public:
+    bool ReadPciConfig(std::uint32_t, void* buffer, std::size_t size) override {
+        if (!pciReadable || size != sizeof(rawPciValue)) return false;
+        std::memcpy(buffer, &rawPciValue, size);
+        return true;
+    }
+
+    bool ReadMsr(std::uint32_t, std::uint32_t, std::uint64_t&) override { return false; }
+
+    bool pciReadable = true;
+    std::uint32_t rawPciValue = 0;
+};
+
+void TestAmdTemperatureProviderSafety() {
+    double celsius = 0.0;
+    Check(monitor::IsSupportedAmdZenIdentity({0x17, 0x31, 0}),
+          "AMD provider recognizes its explicitly supported family");
+    Check(!monitor::IsSupportedAmdZenIdentity({0x19, 0x61, 0}),
+          "AMD provider rejects unverified CPU families");
+    Check(monitor::DecodeAmdZenTemperature(0x40000000u, 0.0, celsius) &&
+              std::abs(celsius - 64.0) < 0.01,
+          "AMD provider decodes the documented fixed-point temperature field");
+
+    FakeHardwareAccess access;
+    const monitor::AmdCpuIdentity identity{0x17, 0x31, 0};
+    monitor::AmdTemperatureProvider emptyMap(access, identity, {});
+    Check(!emptyMap.ReadPackageTemperature(celsius),
+          "AMD provider refuses direct reads without an explicit register map");
+
+    monitor::AmdTemperatureRegisterMap map{};
+    map.bus = 0;
+    map.device = 0x18;
+    map.function = 3;
+    map.offset = 0xA4;
+    map.width = 4;
+    access.rawPciValue = 0x40000000u;
+    monitor::AmdTemperatureProvider mapped(access, identity, map);
+    Check(mapped.ReadPackageTemperature(celsius) && std::abs(celsius - 64.0) < 0.01,
+          "AMD provider reads only the explicitly supplied PCI map");
+}
+
+void TestGenericSensorRegistry() {
+    monitor::SensorRegistry registry;
+    registry.Upsert({L"cpu.package.temperature", L"CPU", monitor::SensorType::Temperature,
+                     50.0, true, 1});
+    registry.Upsert({L"cpu.package.temperature", L"CPU", monitor::SensorType::Temperature,
+                     55.0, true, 2});
+    const auto* cpu = registry.Find(L"cpu.package.temperature");
+    Check(cpu && std::abs(cpu->value - 55.0) < 0.01 && cpu->timestamp == 2,
+          "sensor registry replaces an older value with the current value");
+    registry.Clear();
+    Check(registry.Find(L"cpu.package.temperature") == nullptr,
+          "sensor registry clears readings that are no longer collected");
+
+    monitor::SensorSnapshot snapshot;
+    snapshot.cpuTemperature = 60.0;
+    snapshot.cpuTemperatureValid = true;
+    snapshot.cpuClockMHz = 3600.0;
+    snapshot.cpuClockValid = true;
+    snapshot.memoryUsedBytes = 8ULL * 1024ULL * 1024ULL * 1024ULL;
+    snapshot.memoryValid = true;
+    snapshot.downloadBytesPerSecond = 1024;
+    snapshot.networkValid = true;
+    snapshot.diskTemperature = 40.0;
+    snapshot.diskTemperatureValid = true;
+    snapshot.diskReadBytesPerSecond = 2048;
+    snapshot.diskWriteBytesPerSecond = 1024;
+    snapshot.diskIoValid = true;
+    snapshot.gpuTemperature = 50.0;
+    snapshot.gpuTemperatureValid = true;
+    snapshot.gpuUsage = 70.0;
+    snapshot.gpuUsageValid = true;
+    snapshot.gpuMemoryUsedBytes = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+    snapshot.gpuMemoryTotalBytes = 8ULL * 1024ULL * 1024ULL * 1024ULL;
+    snapshot.gpuMemoryValid = true;
+    snapshot.gpuPower = 125.0;
+    snapshot.gpuPowerValid = true;
+    snapshot.gpuFanPercent = 45.0;
+    snapshot.gpuFanValid = true;
+    snapshot.batteryPercent = 75.0;
+    snapshot.batteryValid = true;
+    snapshot.batteryState = monitor::BatteryCharging;
+    snapshot.systemPower = 20.0;
+    snapshot.systemPowerValid = true;
+    monitor::SensorCollection sensors;
+    monitor::AddSnapshotSensors(snapshot, monitor::DemandCpuTemperature | monitor::DemandMemory |
+                                 monitor::DemandNetwork | monitor::DemandDiskTemperature |
+                                 monitor::DemandDiskIo | monitor::DemandCpuClock |
+                                 monitor::DemandGpuTemperature | monitor::DemandGpuUsage |
+                                 monitor::DemandVram | monitor::DemandGpuPower | monitor::DemandFan |
+                                 monitor::DemandBattery | monitor::DemandSystemPower,
+                                 123, sensors);
+    Check(sensors.size() == 18, "snapshot provider maps every demanded legacy reading into generic sensors");
+    Check(sensors[0].identifier == L"cpu.package.temperature" && sensors[0].valid &&
+              sensors[0].timestamp == 123,
+          "snapshot provider preserves CPU reading validity and collection time");
+    bool sawStorageRead = false;
+    bool sawStorageWrite = false;
+    bool sawCpuClock = false;
+    bool sawGpuFan = false;
+    bool sawBattery = false;
+    bool sawSystemPower = false;
+    for (const auto& sensor : sensors) {
+        sawStorageRead = sawStorageRead || sensor.identifier == L"storage.read";
+        sawStorageWrite = sawStorageWrite || sensor.identifier == L"storage.write";
+        sawCpuClock = sawCpuClock || sensor.identifier == L"cpu.clock";
+        sawGpuFan = sawGpuFan || sensor.identifier == L"gpu.fan";
+        sawBattery = sawBattery || sensor.identifier == L"battery.percent";
+        sawSystemPower = sawSystemPower || sensor.identifier == L"system.power";
+    }
+    Check(sawStorageRead && sawStorageWrite,
+          "snapshot provider maps disk I/O into the generic sensor collection");
+    Check(sawCpuClock && sawGpuFan && sawBattery && sawSystemPower,
+          "snapshot provider includes clock, GPU, battery, and system-power readings");
+}
+
+void TestWmiRetryDeadline() {
+    Check(monitor::WmiRetryDelayMilliseconds(1000, 0) == 0,
+          "WMI retries immediately before any failure");
+    Check(monitor::WmiRetryDelayMilliseconds(1000, 31000) == 30000,
+          "WMI failed-probe retry waits for the configured backoff");
+    Check(monitor::WmiRetryDelayMilliseconds(30999, 31000) == 1,
+          "WMI retry delay counts down to the retry deadline");
+    Check(monitor::WmiRetryDelayMilliseconds(31000, 31000) == 0,
+          "WMI retry is allowed at the retry deadline");
 }
 
 void TestTemperatureConversion() {
@@ -560,6 +753,10 @@ void TestTaskbarWidthUsesOneLayoutDefinition() {
 } // namespace
 
 int main() {
+    TestProviderFallbacks();
+    TestAmdTemperatureProviderSafety();
+    TestGenericSensorRegistry();
+    TestWmiRetryDeadline();
     TestTemperatureConversion();
     TestIntelMsrTemperature();
     TestIntelRaplPower();

@@ -3,9 +3,10 @@
 #include <string>
 #include <vector>
 #include "SensorTypes.h"
+#include "NetworkProvider.h"
 
 namespace monitor {
-class NetworkMonitor {
+class NetworkMonitor : public INetworkProvider {
 public:
     void SetAdapter(const std::wstring& adapter) {
         if (adapter_ == adapter) return;
@@ -14,8 +15,8 @@ public:
         lastInterfaceScanTick_ = 0;
         initialized_ = false;
     }
-    void Update(SensorSnapshot& snapshot);
-    void ResetSampling() { initialized_ = false; }
+    void Update(SensorSnapshot& snapshot) override;
+    void ResetSampling() override { initialized_ = false; }
 private:
     bool RefreshInterfaceCache(std::uint64_t& inputBytes, std::uint64_t& outputBytes);
     bool ReadCachedInterfaces(std::uint64_t& inputBytes, std::uint64_t& outputBytes) const;

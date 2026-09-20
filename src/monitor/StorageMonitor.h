@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include "SensorTypes.h"
+#include "StorageProvider.h"
 #include <string>
 #include <vector>
 
@@ -14,11 +15,11 @@ struct StorageDeviceInfo {
 
 std::vector<StorageDeviceInfo> EnumerateStorageDevices();
 
-class StorageMonitor {
+class StorageMonitor : public IStorageProvider {
 public:
-    void Update(SensorSnapshot& snapshot, bool collectTemperature, bool collectIo);
-    void ForceRefresh() { lastScan_ = 0; }
-    void ResetIoSampling() { ioInitialized_ = false; ioDriveIndex_ = -1; }
+    void Update(SensorSnapshot& snapshot, bool collectTemperature, bool collectIo) override;
+    void ForceRefresh() override { lastScan_ = 0; }
+    void ResetIoSampling() override { ioInitialized_ = false; ioDriveIndex_ = -1; }
     void SetDriveIndex(int index) {
         const int next = index >= 0 && index < 32 ? index : -1;
         if (selectedDriveIndex_ == next) return;

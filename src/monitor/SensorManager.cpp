@@ -5,8 +5,10 @@ SensorSnapshot SensorManager::Update(std::uint32_t demand, bool forceRefresh) {
     SensorSnapshot s;
     if (demand == 0) {
         cpu_.ResetUsage();
+        cpu_.ResetPowerSampling();
         network_.ResetSampling();
         storage_.ResetIoSampling();
+        registry_.Clear();
         return s;
     }
 
@@ -16,9 +18,11 @@ SensorSnapshot SensorManager::Update(std::uint32_t demand, bool forceRefresh) {
         cpu_.ResetUsage();
 
     if (HasSensorDemand(demand, DemandCpuTemperature))
-        s.cpuTemperature = cpu_.ReadTemperature(s.cpuTemperatureValid);
+        s.cpuTemperature = cpu_.ReadTemperature(s.cpuTemperatureValid, forceRefresh);
     if (HasSensorDemand(demand, DemandCpuPower))
         s.cpuPower = cpu_.ReadPackagePower(s.cpuPowerValid);
+    else
+        cpu_.ResetPowerSampling();
 
     if (HasSensorDemand(demand, DemandMemory)) system_.UpdateMemory(s);
     if (HasSensorDemand(demand, DemandCpuClock)) system_.UpdateCpuClock(s);
@@ -38,6 +42,10 @@ SensorSnapshot SensorManager::Update(std::uint32_t demand, bool forceRefresh) {
     if (diskTemperature || diskIo) storage_.Update(s, diskTemperature, diskIo);
     else storage_.ResetIoSampling();
 
+    registry_.Clear();
+    SensorCollection generic;
+    AddSnapshotSensors(s, demand, static_cast<std::uint64_t>(GetTickCount64()), generic);
+    for (auto& value : generic) registry_.Upsert(std::move(value));
     return s;
 }
 }
