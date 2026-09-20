@@ -161,9 +161,11 @@ Enter   直接换到任务栏第二行
 {ram_used:gb}      12.0 GB
 {down:mb}          12.4 MB/s
 {up:kb}            320 KB/s
+{up:short}         320K
+{battery:short}    79%A
 ```
 
-速率变量 `down` / `up` / `disk_read` / `disk_write` 支持 `kb`、`mb`、`gb`；内存/显存容量变量支持 `mb`、`gb`。
+速率变量 `down` / `up` / `disk_read` / `disk_write` 支持 `kb`、`mb`、`gb`，以及更适合任务栏的 `short`（如 `182K`、`12.4M`）；`battery:short` 使用紧凑状态（如 `79%A`、`78%+`）。内存/显存容量变量支持 `mb`、`gb`。
 
 条件段语法：
 

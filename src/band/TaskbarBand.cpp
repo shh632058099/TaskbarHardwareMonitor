@@ -684,7 +684,7 @@ void TaskbarBand::Paint(HDC dc) {
     if (!customFormat.empty()) {
         const auto formatted = BuildFormattedTaskbarLayout(snapshot, customFormat, &config);
         constexpr int outerPadding = 2;
-        constexpr int columnGap = 10;
+        constexpr int columnGap = 6;
         int measuredRowWidths[2]{};
         std::vector<int> columnWidths(std::max(1, formatted.columns), 0);
         std::vector<int> rowColumnWidths[2] = {

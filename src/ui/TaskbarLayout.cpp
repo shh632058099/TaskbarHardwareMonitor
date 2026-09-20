@@ -124,7 +124,17 @@ std::wstring FormatRateForced(std::uint64_t bytes, bool valid, const std::wstrin
     if (!valid) return L"--";
     std::wstringstream stream;
     stream << std::fixed;
-    if (modifier == L"kb") {
+    if (modifier == L"short") {
+        if (bytes >= 1024ULL * 1024ULL * 1024ULL) {
+            const double gb = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
+            stream << std::setprecision(gb < 10.0 ? 1 : 0) << gb << L"G";
+        } else if (bytes >= 1024ULL * 1024ULL) {
+            const double mb = static_cast<double>(bytes) / (1024.0 * 1024.0);
+            stream << std::setprecision(mb < 100.0 ? 1 : 0) << mb << L"M";
+        } else {
+            stream << std::setprecision(0) << static_cast<double>(bytes) / 1024.0 << L"K";
+        }
+    } else if (modifier == L"kb") {
         stream << std::setprecision(0) << static_cast<double>(bytes) / 1024.0 << L" KB/s";
     } else if (modifier == L"mb") {
         stream << std::setprecision(1) << static_cast<double>(bytes) / (1024.0 * 1024.0) << L" MB/s";
@@ -161,7 +171,8 @@ bool FormatVariable(const std::wstring& spec, const SensorSnapshot& snapshot,
     } else if (name == L"down" || name == L"up") {
         const auto bytes = name == L"down" ? snapshot.downloadBytesPerSecond : snapshot.uploadBytesPerSecond;
         value = FormatRateForced(bytes, snapshot.networkValid, modifier);
-        stable = (modifier == L"kb") ? L"99999 KB/s" :
+        stable = (modifier == L"short") ? L"1023M" :
+                 (modifier == L"kb") ? L"99999 KB/s" :
                  (modifier == L"gb") ? L"99.9 GB/s" : L"999.9 MB/s";
     } else if (name == L"power") {
         value = oneDecimal ? FormatFixed(snapshot.cpuPower, snapshot.cpuPowerValid, 1, L"W")
@@ -193,7 +204,8 @@ bool FormatVariable(const std::wstring& spec, const SensorSnapshot& snapshot,
     } else if (name == L"disk_read" || name == L"disk_write") {
         const auto bytes = name == L"disk_read" ? snapshot.diskReadBytesPerSecond : snapshot.diskWriteBytesPerSecond;
         value = FormatRateForced(bytes, snapshot.diskIoValid, modifier);
-        stable = (modifier == L"kb") ? L"99999 KB/s" :
+        stable = (modifier == L"short") ? L"1023M" :
+                 (modifier == L"kb") ? L"99999 KB/s" :
                  (modifier == L"gb") ? L"99.9 GB/s" : L"999.9 MB/s";
     } else if (name == L"cpu_clock") {
         if (modifier == L"ghz") value = FormatFixed(snapshot.cpuClockMHz / 1000.0, snapshot.cpuClockValid, 1, L" GHz");
@@ -209,8 +221,9 @@ bool FormatVariable(const std::wstring& spec, const SensorSnapshot& snapshot,
                            : FormatUsage(snapshot.gpuFanPercent, snapshot.gpuFanValid);
         stable = oneDecimal ? L"100.0%" : L"100%";
     } else if (name == L"battery") {
-        value = FormatBattery(snapshot, false);
-        stable = L"100% FULL";
+        const bool shortBattery = modifier == L"short";
+        value = FormatBattery(snapshot, shortBattery);
+        stable = shortBattery ? L"100%\u2713" : L"100% FULL";
     } else if (name == L"battery_percent") {
         value = oneDecimal ? FormatFixed(snapshot.batteryPercent, snapshot.batteryValid, 1, L"%")
                            : FormatUsage(snapshot.batteryPercent, snapshot.batteryValid);

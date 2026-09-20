@@ -265,6 +265,17 @@ void TestDisplayFormat2ModifiersAndConditions() {
     Check(modifiers.runs[4].text == L"12.0 GB", "memory gb modifier formats units");
     Check(modifiers.runs[6].text == L"12.0 MB/s", "network mb modifier formats units");
 
+    snapshot.downloadBytesPerSecond = 182ULL * 1024ULL;
+    snapshot.batteryPercent = 79.0;
+    snapshot.batteryValid = true;
+    snapshot.batteryState = monitor::BatteryOnAc;
+    const auto compact = monitor::BuildFormattedTaskbarLayout(
+        snapshot, L"{down:short}|{battery:short}");
+    Check(compact.runs.size() == 3, "short format modifiers preserve separators");
+    Check(compact.runs[0].text == L"182K", "network short modifier removes verbose rate suffix");
+    Check(compact.runs[0].stableText == L"1023M", "network short modifier keeps bounded stable width");
+    Check(compact.runs[2].text == L"79%A", "battery short modifier uses compact AC state");
+
     const auto hidden = monitor::BuildFormattedTaskbarLayout(
         snapshot, L"A{gpu_temp? GPU:{gpu_temp}}B");
     std::wstring hiddenText;

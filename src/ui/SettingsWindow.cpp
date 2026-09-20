@@ -36,13 +36,13 @@ constexpr wchar_t FormatHintText[] =
     L"\r\n"
     L"普通变量：{cpu_temp}  {cpu_usage}  {ram_usage}  {down}  {up}\r\n"
     L"精度：{cpu_temp:1} -> 54.3°    {cpu_usage:1} -> 23.0%\r\n"
-    L"单位：{cpu_clock:ghz}  {ram_used:gb}  {down:mb}\r\n"
+    L"单位：{cpu_clock:ghz}  {ram_used:gb}  {down:mb}  {down:short}\r\n"
     L"条件段：{gpu_temp?GPU:{gpu_temp}}\r\n"
     L"        只有 GPU 温度有效时才显示整个 GPU 段\r\n"
     L"\r\n"
     L"示例：\r\n"
     L"CPU:{cpu_temp:1}\\tRAM:{ram_usage}\\t{gpu_temp?GPU:{gpu_temp}}\r\n"
-    L"↑:{up:mb}\\t↓:{down:mb}\\tBAT:{battery}";
+    L"↑{up:short}\\t↓{down:short}\\tB{battery:short}";
 constexpr wchar_t BandSettingsPath[] = L"Software\\TaskbarHardwareMonitor\\TaskbarBand";
 constexpr wchar_t HelpText[] =
     L"Taskbar Hardware Monitor 帮助\r\n"
@@ -729,7 +729,8 @@ void SettingsWindow::ShowFormatVariables() {
         L"\\t            Start the next aligned column; matching columns align across rows\n\n"
         L"Format 2.0 modifiers:\n"
         L"{cpu_temp:1} one decimal   {cpu_clock:ghz} GHz   {ram_used:gb} GB\n"
-        L"{down:kb|mb|gb} forced rate unit\n"
+        L"{down:kb|mb|gb} forced rate unit; {down:short} compact K/M/G\n"
+        L"{battery:short} compact battery state, e.g. 79%A\n"
         L"Conditional: {gpu_temp?GPU:{gpu_temp}}\n"
         L"The body is hidden when the condition variable has no valid data.\n\n"
         L"Example:\n"
