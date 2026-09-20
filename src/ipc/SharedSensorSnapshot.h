@@ -7,7 +7,7 @@
 
 namespace monitor {
 
-constexpr wchar_t SharedSensorMappingName[] = L"Local\\TaskbarHardwareMonitor.SensorSnapshot.v2";
+constexpr wchar_t SharedSensorMappingName[] = L"Local\\TaskbarHardwareMonitor.SensorSnapshot.v3";
 constexpr wchar_t SharedBandCommandMappingName[] = L"Local\\TaskbarHardwareMonitor.BandCommand.v1";
 constexpr wchar_t SharedSensorEventName[] = L"Local\\TaskbarHardwareMonitor.SensorSnapshotEvent.v1";
 constexpr wchar_t SharedBandCommandEventName[] = L"Local\\TaskbarHardwareMonitor.BandCommandEvent.v1";
@@ -31,6 +31,10 @@ enum SnapshotDisplayFlags : std::uint32_t {
     ShowFan = 1u << 13,
     ShowBattery = 1u << 14,
     ShowSystemPower = 1u << 15,
+    ShowCpuInternalTemperature = 1u << 16,
+    ShowGpuInternalTemperature = 1u << 17,
+    ShowCpuFanRpm = 1u << 18,
+    ShowGpuFanRpm = 1u << 19,
 };
 
 inline std::uint32_t DisplayFlagsFromConfig(const Config& config) {
@@ -50,6 +54,10 @@ inline std::uint32_t DisplayFlagsFromConfig(const Config& config) {
     if (config.showFan) flags |= ShowFan;
     if (config.showBattery) flags |= ShowBattery;
     if (config.showSystemPower) flags |= ShowSystemPower;
+    if (config.showCpuInternalTemperature) flags |= ShowCpuInternalTemperature;
+    if (config.showGpuInternalTemperature) flags |= ShowGpuInternalTemperature;
+    if (config.showCpuFanRpm) flags |= ShowCpuFanRpm;
+    if (config.showGpuFanRpm) flags |= ShowGpuFanRpm;
     return flags;
 }
 
@@ -69,7 +77,7 @@ enum BandCommandAction : std::uint32_t {
 };
 
 struct SharedSensorSnapshot {
-    std::uint32_t version = 2;
+    std::uint32_t version = 3;
     std::uint32_t sequence = 0;
     double cpuTemperature = 0.0;
     double cpuUsage = 0.0;
@@ -83,6 +91,10 @@ struct SharedSensorSnapshot {
     double gpuFanPercent = 0.0;
     double batteryPercent = 0.0;
     double systemPower = 0.0;
+    double cpuInternalTemperature = 0.0;
+    double gpuInternalTemperature = 0.0;
+    double cpuFanRpm = 0.0;
+    double gpuFanRpm = 0.0;
     std::uint64_t memoryUsedBytes = 0;
     std::uint64_t memoryTotalBytes = 0;
     std::uint64_t gpuMemoryUsedBytes = 0;
@@ -101,7 +113,7 @@ struct SharedSensorSnapshot {
 
 inline bool IsSharedSnapshotFresh(const SharedSensorSnapshot& snapshot,
                                   std::uint64_t nowTick) {
-    return snapshot.version == 2 && snapshot.timestamp != 0 &&
+    return snapshot.version == 3 && snapshot.timestamp != 0 &&
            snapshot.timestamp <= nowTick &&
            nowTick - snapshot.timestamp <= SnapshotStaleTimeoutMs;
 }
@@ -122,6 +134,10 @@ enum SnapshotValid : std::uint32_t {
     DiskIoValid = 1u << 14,
     BatteryValid = 1u << 15,
     SystemPowerValid = 1u << 16,
+    CpuInternalTemperatureValid = 1u << 17,
+    GpuInternalTemperatureValid = 1u << 18,
+    CpuFanRpmValid = 1u << 19,
+    GpuFanRpmValid = 1u << 20,
 };
 
 inline SharedSensorSnapshot ToSharedSnapshot(const SensorSnapshot& source, const Config& config) {
@@ -138,6 +154,10 @@ inline SharedSensorSnapshot ToSharedSnapshot(const SensorSnapshot& source, const
     target.gpuFanPercent = source.gpuFanPercent;
     target.batteryPercent = source.batteryPercent;
     target.systemPower = source.systemPower;
+    target.cpuInternalTemperature = source.cpuInternalTemperature;
+    target.gpuInternalTemperature = source.gpuInternalTemperature;
+    target.cpuFanRpm = source.cpuFanRpm;
+    target.gpuFanRpm = source.gpuFanRpm;
     target.memoryUsedBytes = source.memoryUsedBytes;
     target.memoryTotalBytes = source.memoryTotalBytes;
     target.gpuMemoryUsedBytes = source.gpuMemoryUsedBytes;
@@ -164,6 +184,10 @@ inline SharedSensorSnapshot ToSharedSnapshot(const SensorSnapshot& source, const
     if (source.diskIoValid) target.validMask |= DiskIoValid;
     if (source.batteryValid) target.validMask |= BatteryValid;
     if (source.systemPowerValid) target.validMask |= SystemPowerValid;
+    if (source.cpuInternalTemperatureValid) target.validMask |= CpuInternalTemperatureValid;
+    if (source.gpuInternalTemperatureValid) target.validMask |= GpuInternalTemperatureValid;
+    if (source.cpuFanRpmValid) target.validMask |= CpuFanRpmValid;
+    if (source.gpuFanRpmValid) target.validMask |= GpuFanRpmValid;
     return target;
 }
 
@@ -181,6 +205,10 @@ inline SensorSnapshot FromSharedSnapshot(const SharedSensorSnapshot& source) {
     target.gpuFanPercent = source.gpuFanPercent;
     target.batteryPercent = source.batteryPercent;
     target.systemPower = source.systemPower;
+    target.cpuInternalTemperature = source.cpuInternalTemperature;
+    target.gpuInternalTemperature = source.gpuInternalTemperature;
+    target.cpuFanRpm = source.cpuFanRpm;
+    target.gpuFanRpm = source.gpuFanRpm;
     target.memoryUsedBytes = source.memoryUsedBytes;
     target.memoryTotalBytes = source.memoryTotalBytes;
     target.gpuMemoryUsedBytes = source.gpuMemoryUsedBytes;
@@ -205,6 +233,10 @@ inline SensorSnapshot FromSharedSnapshot(const SharedSensorSnapshot& source) {
     target.diskIoValid = (source.validMask & DiskIoValid) != 0;
     target.batteryValid = (source.validMask & BatteryValid) != 0;
     target.systemPowerValid = (source.validMask & SystemPowerValid) != 0;
+    target.cpuInternalTemperatureValid = (source.validMask & CpuInternalTemperatureValid) != 0;
+    target.gpuInternalTemperatureValid = (source.validMask & GpuInternalTemperatureValid) != 0;
+    target.cpuFanRpmValid = (source.validMask & CpuFanRpmValid) != 0;
+    target.gpuFanRpmValid = (source.validMask & GpuFanRpmValid) != 0;
     return target;
 }
 

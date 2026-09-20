@@ -45,6 +45,21 @@ SensorSnapshot SensorManager::Update(std::uint32_t demand, bool forceRefresh) {
     registry_.Clear();
     SensorCollection generic;
     AddSnapshotSensors(s, demand, static_cast<std::uint64_t>(GetTickCount64()), generic);
+    if (ShouldReadInternalThermoFans(demand)) {
+        DellThermoFanSnapshot dellSnapshot;
+        if (dellThermoFan_.Read(dellSnapshot)) {
+            s.cpuInternalTemperature = dellSnapshot.cpuTemperature;
+            s.cpuInternalTemperatureValid = dellSnapshot.cpuTemperatureValid;
+            s.gpuInternalTemperature = dellSnapshot.gpuTemperature;
+            s.gpuInternalTemperatureValid = dellSnapshot.gpuTemperatureValid;
+            s.cpuFanRpm = dellSnapshot.cpuFanRpm;
+            s.cpuFanRpmValid = dellSnapshot.cpuFanRpmValid;
+            s.gpuFanRpm = dellSnapshot.gpuFanRpm;
+            s.gpuFanRpmValid = dellSnapshot.gpuFanRpmValid;
+            AddDellThermoFanSensors(dellSnapshot,
+                                    static_cast<std::uint64_t>(GetTickCount64()), generic);
+        }
+    }
     for (auto& value : generic) registry_.Upsert(std::move(value));
     return s;
 }

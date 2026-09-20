@@ -49,6 +49,10 @@ bool SameVisualSnapshot(const SharedSensorSnapshot& a, const SharedSensorSnapsho
            a.gpuFanPercent == b.gpuFanPercent &&
            a.batteryPercent == b.batteryPercent &&
            a.systemPower == b.systemPower &&
+           a.cpuInternalTemperature == b.cpuInternalTemperature &&
+           a.gpuInternalTemperature == b.gpuInternalTemperature &&
+           a.cpuFanRpm == b.cpuFanRpm &&
+           a.gpuFanRpm == b.gpuFanRpm &&
            a.memoryUsedBytes == b.memoryUsedBytes &&
            a.memoryTotalBytes == b.memoryTotalBytes &&
            a.gpuMemoryUsedBytes == b.gpuMemoryUsedBytes &&
@@ -73,6 +77,10 @@ constexpr UINT CommandGpuPower = 1021;
 constexpr UINT CommandFan = 1022;
 constexpr UINT CommandBattery = 1023;
 constexpr UINT CommandSystemPower = 1024;
+constexpr UINT CommandCpuInternalTemperature = 1025;
+constexpr UINT CommandGpuInternalTemperature = 1026;
+constexpr UINT CommandCpuFanRpm = 1027;
+constexpr UINT CommandGpuFanRpm = 1028;
 constexpr UINT CommandSettings = 1040;
 constexpr UINT CommandExit = 1041;
 constexpr UINT SnapshotEventMessage = WM_APP + 20;
@@ -655,6 +663,10 @@ void TaskbarBand::Paint(HDC dc) {
         config.showFan = (sharedSnapshot.displayFlags & ShowFan) != 0;
         config.showBattery = (sharedSnapshot.displayFlags & ShowBattery) != 0;
         config.showSystemPower = (sharedSnapshot.displayFlags & ShowSystemPower) != 0;
+        config.showCpuInternalTemperature = (sharedSnapshot.displayFlags & ShowCpuInternalTemperature) != 0;
+        config.showGpuInternalTemperature = (sharedSnapshot.displayFlags & ShowGpuInternalTemperature) != 0;
+        config.showCpuFanRpm = (sharedSnapshot.displayFlags & ShowCpuFanRpm) != 0;
+        config.showGpuFanRpm = (sharedSnapshot.displayFlags & ShowGpuFanRpm) != 0;
     }
     if (!hasSnapshot) {
         config.showCpuTemperature = true;
@@ -1063,16 +1075,20 @@ LRESULT TaskbarBand::HandleMessage(HWND window, UINT message, WPARAM wParam, LPA
     const UINT metricIds[] = {
         CommandCpu, CommandCpuUsage, CommandGpu, CommandSsd, CommandNetwork, CommandPower,
         CommandMemory, CommandGpuUsage, CommandVram, CommandDiskIo, CommandCpuClock,
-        CommandGpuPower, CommandFan, CommandBattery, CommandSystemPower};
+        CommandGpuPower, CommandFan, CommandBattery, CommandSystemPower,
+        CommandCpuInternalTemperature, CommandGpuInternalTemperature, CommandCpuFanRpm, CommandGpuFanRpm};
     const UINT metricFlags[] = {
         ShowCpuTemperature, ShowCpuUsage, ShowGpuTemperature, ShowDiskTemperature, ShowNetwork,
         ShowPower, ShowMemory, ShowGpuUsage, ShowVram, ShowDiskIo, ShowCpuClock,
-        ShowGpuPower, ShowFan, ShowBattery, ShowSystemPower};
+        ShowGpuPower, ShowFan, ShowBattery, ShowSystemPower, ShowCpuInternalTemperature,
+        ShowGpuInternalTemperature, ShowCpuFanRpm, ShowGpuFanRpm};
     const wchar_t* const metricLabels[] = {
         L"CPU Temperature", L"CPU Usage", L"GPU Temperature", L"Disk Temperature", L"Network",
         L"CPU Power", L"RAM Usage", L"GPU Usage", L"VRAM", L"Disk Read/Write",
-        L"CPU Clock", L"GPU Power", L"GPU Fan", L"Battery", L"System Power"};
-    for (int index = 0; index != 15; ++index) {
+        L"CPU Clock", L"GPU Power", L"GPU Fan", L"Battery", L"System Power",
+        L"CPU Internal Temperature", L"GPU Internal Temperature", L"CPU Fan RPM",
+        L"GPU Fan RPM"};
+    for (int index = 0; index != 19; ++index) {
         AppendMenuW(metrics, MF_STRING | ((flags & metricFlags[index]) ? MF_CHECKED : 0) |
                     (customFormatControlsMetrics ? MF_GRAYED : 0),
                     metricIds[index], metricLabels[index]);
@@ -1096,7 +1112,7 @@ LRESULT TaskbarBand::HandleMessage(HWND window, UINT message, WPARAM wParam, LPA
     } else if (command == CommandRowsOne || command == CommandRowsTwo) {
         SaveLayoutRows(command == CommandRowsTwo ? 2 : 1);
         InvalidateRect(window, nullptr, FALSE);
-    } else if (command >= CommandCpu && command <= CommandSystemPower && hasSnapshot &&
+    } else if (command >= CommandCpu && command <= CommandGpuFanRpm && hasSnapshot &&
                !customFormatControlsMetrics) {
         std::uint32_t nextFlags = snapshot.displayFlags;
         nextFlags ^= metricFlags[command - CommandCpu];

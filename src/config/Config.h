@@ -43,6 +43,10 @@ struct Config {
     bool showFan = false;
     bool showBattery = false;
     bool showSystemPower = false;
+    bool showCpuInternalTemperature = false;
+    bool showGpuInternalTemperature = false;
+    bool showCpuFanRpm = false;
+    bool showGpuFanRpm = false;
     bool fixedWidth = true;
     bool tabularNumbers = true;
     std::wstring path;

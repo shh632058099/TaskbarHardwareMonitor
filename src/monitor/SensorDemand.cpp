@@ -32,6 +32,10 @@ std::uint32_t DemandForVariable(const std::wstring& spec) {
     if (name == L"fan") return DemandFan;
     if (name == L"battery" || name == L"battery_percent" || name == L"battery_status") return DemandBattery;
     if (name == L"system_power") return DemandSystemPower;
+    if (name == L"cpu_internal_temp") return DemandCpuInternalTemperature;
+    if (name == L"gpu_internal_temp") return DemandGpuInternalTemperature;
+    if (name == L"cpu_fan_rpm") return DemandCpuFanRpm;
+    if (name == L"gpu_fan_rpm") return DemandGpuFanRpm;
     return 0;
 }
 
@@ -60,7 +64,9 @@ std::uint32_t SensorDemandForMetricIndex(int index) {
     static constexpr std::uint32_t flags[] = {
         DemandCpuTemperature, DemandCpuUsage, DemandGpuTemperature, DemandDiskTemperature,
         DemandNetwork, DemandCpuPower, DemandMemory, DemandGpuUsage, DemandVram, DemandDiskIo,
-        DemandCpuClock, DemandGpuPower, DemandFan, DemandBattery, DemandSystemPower};
+        DemandCpuClock, DemandGpuPower, DemandFan, DemandBattery, DemandSystemPower,
+        DemandCpuInternalTemperature, DemandGpuInternalTemperature,
+        DemandCpuFanRpm, DemandGpuFanRpm};
     return index >= 0 && index < static_cast<int>(sizeof(flags) / sizeof(flags[0]))
         ? flags[index] : 0;
 }
@@ -82,6 +88,10 @@ std::uint32_t SensorDemandFromMetrics(const Config& config) {
     if (config.showFan) demand |= DemandFan;
     if (config.showBattery) demand |= DemandBattery;
     if (config.showSystemPower) demand |= DemandSystemPower;
+    if (config.showCpuInternalTemperature) demand |= DemandCpuInternalTemperature;
+    if (config.showGpuInternalTemperature) demand |= DemandGpuInternalTemperature;
+    if (config.showCpuFanRpm) demand |= DemandCpuFanRpm;
+    if (config.showGpuFanRpm) demand |= DemandGpuFanRpm;
     return demand;
 }
 
@@ -134,6 +144,10 @@ void ApplySensorDemandToMetrics(Config& config, std::uint32_t demand) {
     config.showFan = HasSensorDemand(demand, DemandFan);
     config.showBattery = HasSensorDemand(demand, DemandBattery);
     config.showSystemPower = HasSensorDemand(demand, DemandSystemPower);
+    config.showCpuInternalTemperature = HasSensorDemand(demand, DemandCpuInternalTemperature);
+    config.showGpuInternalTemperature = HasSensorDemand(demand, DemandGpuInternalTemperature);
+    config.showCpuFanRpm = HasSensorDemand(demand, DemandCpuFanRpm);
+    config.showGpuFanRpm = HasSensorDemand(demand, DemandGpuFanRpm);
 }
 
 } // namespace monitor

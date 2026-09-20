@@ -109,7 +109,9 @@ bool IsKnownFormatVariable(const std::wstring& name) {
            name == L"vram_used" || name == L"vram_total" || name == L"disk_read" ||
            name == L"disk_write" || name == L"cpu_clock" || name == L"gpu_power" ||
            name == L"fan" || name == L"battery" || name == L"battery_percent" ||
-           name == L"battery_status" || name == L"system_power";
+           name == L"battery_status" || name == L"system_power" ||
+           name == L"cpu_internal_temp" || name == L"gpu_internal_temp" ||
+           name == L"cpu_fan_rpm" || name == L"gpu_fan_rpm";
 }
 
 bool IsValidFormatModifier(const std::wstring& name, const std::wstring& modifier) {
@@ -118,7 +120,8 @@ bool IsValidFormatModifier(const std::wstring& name, const std::wstring& modifie
         return name == L"cpu_temp" || name == L"cpu_usage" || name == L"gpu_temp" ||
                name == L"disk_temp" || name == L"ssd_temp" || name == L"power" ||
                name == L"ram_usage" || name == L"gpu_usage" || name == L"gpu_power" ||
-               name == L"fan" || name == L"battery_percent" || name == L"system_power";
+               name == L"fan" || name == L"battery_percent" || name == L"system_power" ||
+               name == L"cpu_internal_temp" || name == L"gpu_internal_temp";
     }
     if (modifier == L"short") return name == L"down" || name == L"up" ||
                                         name == L"disk_read" || name == L"disk_write" ||
@@ -282,6 +285,18 @@ bool FormatVariable(const std::wstring& spec, const SensorSnapshot& snapshot,
         value = oneDecimal ? FormatFixed(snapshot.systemPower, snapshot.systemPowerValid, 1, L"W")
                            : FormatPower(snapshot.systemPower, snapshot.systemPowerValid);
         stable = oneDecimal ? L"999.9W" : L"999W";
+    } else if (name == L"cpu_internal_temp" || name == L"gpu_internal_temp") {
+        const bool cpu = name == L"cpu_internal_temp";
+        const double reading = cpu ? snapshot.cpuInternalTemperature : snapshot.gpuInternalTemperature;
+        const bool valid = cpu ? snapshot.cpuInternalTemperatureValid : snapshot.gpuInternalTemperatureValid;
+        value = FormatTemperatureValue(reading, valid);
+        stable = L"100\u00B0";
+    } else if (name == L"cpu_fan_rpm" || name == L"gpu_fan_rpm") {
+        const bool cpu = name == L"cpu_fan_rpm";
+        const double reading = cpu ? snapshot.cpuFanRpm : snapshot.gpuFanRpm;
+        const bool valid = cpu ? snapshot.cpuFanRpmValid : snapshot.gpuFanRpmValid;
+        value = valid ? std::to_wstring(static_cast<unsigned int>(reading)) + L"R" : L"--R";
+        stable = L"10000R";
     } else {
         return false;
     }
@@ -335,6 +350,10 @@ bool IsFormatVariableAvailable(const std::wstring& spec, const SensorSnapshot& s
     if (name == L"fan") return snapshot.gpuFanValid;
     if (name == L"battery" || name == L"battery_percent" || name == L"battery_status") return snapshot.batteryValid;
     if (name == L"system_power") return snapshot.systemPowerValid;
+    if (name == L"cpu_internal_temp") return snapshot.cpuInternalTemperatureValid;
+    if (name == L"gpu_internal_temp") return snapshot.gpuInternalTemperatureValid;
+    if (name == L"cpu_fan_rpm") return snapshot.cpuFanRpmValid;
+    if (name == L"gpu_fan_rpm") return snapshot.gpuFanRpmValid;
     return false;
 }
 
@@ -362,6 +381,12 @@ AlertSeverity AlertSeverityForVariable(const std::wstring& spec,
                             config.cpuTempWarning, config.cpuTempCritical);
     if (name == L"gpu_temp")
         return highSeverity(snapshot.gpuTemperature, snapshot.gpuTemperatureValid,
+                            config.gpuTempWarning, config.gpuTempCritical);
+    if (name == L"cpu_internal_temp")
+        return highSeverity(snapshot.cpuInternalTemperature, snapshot.cpuInternalTemperatureValid,
+                            config.cpuTempWarning, config.cpuTempCritical);
+    if (name == L"gpu_internal_temp")
+        return highSeverity(snapshot.gpuInternalTemperature, snapshot.gpuInternalTemperatureValid,
                             config.gpuTempWarning, config.gpuTempCritical);
     if (name == L"ram_usage" || name == L"ram_used" || name == L"ram_total")
         return highSeverity(snapshot.memoryUsage, snapshot.memoryValid,
@@ -438,6 +463,10 @@ TaskbarLayout BuildTaskbarLayout(const SensorSnapshot& snapshot, const Config& c
         if (config.showBattery) Add(layout, secondaryRow, L"B", FormatBattery(snapshot, true), widths.usage,
                                     AlertSeverityForVariable(L"battery", snapshot, config));
         if (config.showSystemPower) Add(layout, secondaryRow, L"SYS", FormatPower(snapshot.systemPower, snapshot.systemPowerValid), widths.power);
+        if (config.showCpuInternalTemperature) Add(layout, temperaturesRow, L"CI", FormatTemperatureValue(snapshot.cpuInternalTemperature, snapshot.cpuInternalTemperatureValid), widths.temperature);
+        if (config.showGpuInternalTemperature) Add(layout, temperaturesRow, L"GI", FormatTemperatureValue(snapshot.gpuInternalTemperature, snapshot.gpuInternalTemperatureValid), widths.temperature);
+        if (config.showCpuFanRpm) Add(layout, secondaryRow, L"CF", snapshot.cpuFanRpmValid ? std::to_wstring(static_cast<unsigned int>(snapshot.cpuFanRpm)) + L"R" : L"--R", widths.network);
+        if (config.showGpuFanRpm) Add(layout, secondaryRow, L"GF", snapshot.gpuFanRpmValid ? std::to_wstring(static_cast<unsigned int>(snapshot.gpuFanRpm)) + L"R" : L"--R", widths.network);
     } else {
         if (config.showCpuTemperature) {
             Add(layout, temperaturesRow, L"CPU", FormatTemperatureValue(snapshot.cpuTemperature,
@@ -484,6 +513,10 @@ TaskbarLayout BuildTaskbarLayout(const SensorSnapshot& snapshot, const Config& c
         if (config.showBattery) Add(layout, secondaryRow, L"BAT", FormatBattery(snapshot, false), widths.usage * 2,
                                     AlertSeverityForVariable(L"battery", snapshot, config));
         if (config.showSystemPower) Add(layout, secondaryRow, L"SYS", FormatPower(snapshot.systemPower, snapshot.systemPowerValid), widths.power);
+        if (config.showCpuInternalTemperature) Add(layout, temperaturesRow, L"CPU INT", FormatTemperatureValue(snapshot.cpuInternalTemperature, snapshot.cpuInternalTemperatureValid), widths.temperature);
+        if (config.showGpuInternalTemperature) Add(layout, temperaturesRow, L"GPU INT", FormatTemperatureValue(snapshot.gpuInternalTemperature, snapshot.gpuInternalTemperatureValid), widths.temperature);
+        if (config.showCpuFanRpm) Add(layout, secondaryRow, L"CPU FAN", snapshot.cpuFanRpmValid ? std::to_wstring(static_cast<unsigned int>(snapshot.cpuFanRpm)) + L"R" : L"--R", widths.network);
+        if (config.showGpuFanRpm) Add(layout, secondaryRow, L"GPU FAN", snapshot.gpuFanRpmValid ? std::to_wstring(static_cast<unsigned int>(snapshot.gpuFanRpm)) + L"R" : L"--R", widths.network);
     }
     return layout;
 }
@@ -623,6 +656,11 @@ std::wstring ValidateTaskbarFormat(const std::wstring& format) {
 }
 
 std::wstring BuildDiagnosticsText(const SensorSnapshot& snapshot) {
+    return BuildDiagnosticsText(snapshot, {});
+}
+
+std::wstring BuildDiagnosticsText(const SensorSnapshot& snapshot,
+                                  const SensorCollection& sensors) {
     const auto state = [](bool valid, const wchar_t* unavailable) {
         return valid ? std::wstring(L"Available") : std::wstring(unavailable);
     };
@@ -649,6 +687,21 @@ std::wstring BuildDiagnosticsText(const SensorSnapshot& snapshot) {
     append(L"Battery", state(snapshot.batteryValid, L"Unavailable (no battery or unsupported state)"));
     append(L"System power", state(snapshot.systemPowerValid,
                                    L"Unavailable (no battery or unsupported state)"));
+    const auto appendSensor = [&](const wchar_t* identifier, const wchar_t* label,
+                                  const wchar_t* unit) {
+        for (const auto& sensor : sensors) {
+            if (sensor.identifier != identifier) continue;
+            append(label, sensor.valid
+                ? std::to_wstring(static_cast<unsigned int>(sensor.value)) +
+                    (unit[0] == L'R' ? L"" : L" ") + unit
+                : L"Unavailable");
+            break;
+        }
+    };
+    appendSensor(L"cpu.internal.temperature", L"CPU internal temperature", L"C");
+    appendSensor(L"gpu.internal.temperature", L"GPU internal temperature", L"C");
+    appendSensor(L"cpu.fan.rpm", L"CPU fan", L"R");
+    appendSensor(L"gpu.fan.rpm", L"GPU fan", L"R");
     return text;
 }
 }

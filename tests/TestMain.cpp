@@ -7,8 +7,10 @@
 #include "../src/hardware/SensorRegistry.h"
 #include "../src/monitor/SnapshotSensorProvider.h"
 #include "../src/monitor/WmiTemperatureProvider.h"
+#include "../src/monitor/DellThermoFanWmiProvider.h"
 #include "../src/monitor/SensorTypes.h"
 #include "../src/monitor/SensorDemand.h"
+#include "../src/monitor/SensorManager.h"
 #include "../src/ui/TaskbarLayout.h"
 #include "../src/ipc/SharedSensorSnapshot.h"
 #include "../src/app/App.h"
@@ -59,6 +61,46 @@ public:
 
     std::uint64_t lastNowMilliseconds = 0;
     bool reset = false;
+};
+
+class FakeThermoFanDataSource final : public monitor::IDellThermoFanDataSource {
+public:
+    bool ReadManufacturer(std::wstring& manufacturer, std::uint32_t timeoutMilliseconds) override {
+        ++manufacturerReads;
+        lastManufacturerTimeout = timeoutMilliseconds;
+        if (!manufacturerResults.empty()) {
+            const bool result = static_cast<bool>(manufacturerResults.front());
+            manufacturerResults.erase(manufacturerResults.begin());
+            if (!result) return false;
+        } else if (!manufacturerReadable) {
+            return false;
+        }
+        manufacturer = manufacturerValue;
+        return true;
+    }
+
+    bool ReadThermoFanData(std::vector<std::uint8_t>& data, std::uint32_t timeoutMilliseconds) override {
+        ++dataReads;
+        lastDataTimeout = timeoutMilliseconds;
+        if (results.empty()) return false;
+        const bool result = static_cast<bool>(results.front());
+        results.erase(results.begin());
+        if (!result) return false;
+        data = snapshot;
+        return true;
+    }
+
+    bool manufacturerReadable = true;
+    std::vector<bool> manufacturerResults;
+    std::wstring manufacturerValue = L"Dell Inc.";
+    std::vector<bool> results{true};
+    std::vector<std::uint8_t> snapshot{
+        63, 0, 48, 45, 0, 62, 52, 0, 47, 85, 3, 0, 0, 0,
+        0x94, 0x07, 0, 0, 0, 0, 0, 0, 0x4A, 0x08};
+    int manufacturerReads = 0;
+    int dataReads = 0;
+    std::uint32_t lastManufacturerTimeout = 0;
+    std::uint32_t lastDataTimeout = 0;
 };
 
 void TestProviderFallbacks() {
@@ -215,6 +257,151 @@ void TestWmiRetryDeadline() {
           "WMI retry is allowed at the retry deadline");
 }
 
+void TestDellThermoFanSnapshotDecoding() {
+    const std::uint8_t raw[24] = {
+        63, 0, 48, 45, 0, 62, 52, 0, 47, 85, 3, 0, 0, 0,
+        0x94, 0x07, 0, 0, 0, 0, 0, 0, 0x4A, 0x08
+    };
+    monitor::DellThermoFanSnapshot snapshot;
+    Check(monitor::DecodeDellThermoFanSnapshot(raw, sizeof(raw), snapshot),
+          "Dell ThermoFanData decodes an exact 24-byte snapshot");
+    Check(snapshot.cpuTemperatureValid && std::abs(snapshot.cpuTemperature - 63.0) < 0.01,
+          "Dell ThermoFanData publishes the verified CPU temperature byte");
+    Check(snapshot.gpuTemperatureValid && std::abs(snapshot.gpuTemperature - 45.0) < 0.01,
+          "Dell ThermoFanData publishes the verified GPU temperature byte");
+    Check(snapshot.cpuFanRpmValid && snapshot.cpuFanRpm == 1940,
+          "Dell ThermoFanData decodes data 14 through 15 as CPU fan RPM");
+    Check(snapshot.gpuFanRpmValid && snapshot.gpuFanRpm == 2122,
+          "Dell ThermoFanData decodes data 22 through 23 as GPU fan RPM");
+
+    monitor::SensorCollection sensors;
+    monitor::AddDellThermoFanSensors(snapshot, 123, sensors);
+    Check(sensors.size() == 4, "Dell ThermoFanData publishes only four verified sensors");
+    Check(sensors[0].identifier == L"cpu.internal.temperature" &&
+              sensors[1].identifier == L"gpu.internal.temperature" &&
+              sensors[2].identifier == L"cpu.fan.rpm" &&
+              sensors[3].identifier == L"gpu.fan.rpm",
+          "ThermoFanData feeds provider-neutral internal registry identifiers");
+    Check(sensors[2].type == monitor::SensorType::Fan && sensors[2].value == 1940.0 &&
+              sensors[3].type == monitor::SensorType::Fan && sensors[3].value == 2122.0,
+          "Dell ThermoFanData registers CPU and GPU fan RPM without replacing legacy fields");
+}
+
+void TestDellThermoFanTaskbarFields() {
+    monitor::SensorSnapshot snapshot;
+    snapshot.cpuInternalTemperature = 63.0;
+    snapshot.cpuInternalTemperatureValid = true;
+    snapshot.gpuInternalTemperature = 45.0;
+    snapshot.gpuInternalTemperatureValid = true;
+    snapshot.cpuFanRpm = 1940.0;
+    snapshot.cpuFanRpmValid = true;
+    snapshot.gpuFanRpm = 2122.0;
+    snapshot.gpuFanRpmValid = true;
+
+    const auto layout = monitor::BuildFormattedTaskbarLayout(
+        snapshot, L"{cpu_internal_temp}|{gpu_internal_temp}|{cpu_fan_rpm}|{gpu_fan_rpm}");
+    Check(layout.runs.size() == 7,
+          "Dell ThermoFanData format exposes four independent taskbar variables");
+    Check(layout.runs[0].text == L"63\u00B0" && layout.runs[2].text == L"45\u00B0" &&
+              layout.runs[4].text == L"1940R" && layout.runs[6].text == L"2122R",
+          "Dell ThermoFanData format renders temperatures and fan RPM with units");
+    Check(monitor::IsFormatVariableAvailable(L"cpu_fan_rpm", snapshot) &&
+              monitor::IsFormatVariableAvailable(L"gpu_fan_rpm", snapshot),
+          "Dell ThermoFanData fan variables participate in conditional format sections");
+    Check(monitor::ValidateTaskbarFormat(
+              L"{cpu_internal_temp?C:{cpu_internal_temp}} {gpu_fan_rpm?G:{gpu_fan_rpm}}").empty(),
+          "Dell ThermoFanData variables pass format validation");
+
+    const auto demand = monitor::SensorDemandFromFormat(
+        L"{cpu_internal_temp} {gpu_internal_temp} {cpu_fan_rpm} {gpu_fan_rpm}");
+    Check((demand & monitor::DemandInternalThermoFans) == monitor::DemandInternalThermoFans,
+          "Dell ThermoFanData format variables request their WMI provider");
+}
+
+void TestDellThermoFanSnapshotValidation() {
+    const std::uint8_t valid[24] = {
+        63, 0, 48, 45, 0, 62, 52, 0, 47, 85, 3, 0, 0, 0,
+        0x94, 0x07, 0, 0, 0, 0, 0, 0, 0x4A, 0x08
+    };
+    monitor::DellThermoFanSnapshot snapshot;
+    Check(!monitor::DecodeDellThermoFanSnapshot(valid, 23, snapshot),
+          "Dell ThermoFanData rejects a short snapshot");
+    Check(!monitor::DecodeDellThermoFanSnapshot(valid, 25, snapshot),
+          "Dell ThermoFanData rejects a long snapshot");
+    Check(monitor::IsDellSmbiosManufacturer(L"Dell Inc."),
+          "Dell ThermoFanData accepts the Dell SMBIOS manufacturer");
+    Check(monitor::IsDellSmbiosManufacturer(L" dell computer corporation "),
+          "Dell ThermoFanData accepts a normalized legacy Dell manufacturer");
+    Check(!monitor::IsDellSmbiosManufacturer(L"HP"),
+          "Dell ThermoFanData stays disabled on non-Dell systems");
+
+    auto malformed = std::vector<std::uint8_t>(std::begin(valid), std::end(valid));
+    malformed[0] = 0;
+    malformed[3] = 126;
+    malformed[14] = 0xFF;
+    malformed[15] = 0xFF;
+    malformed[22] = 0;
+    malformed[23] = 0;
+    Check(monitor::DecodeDellThermoFanSnapshot(malformed.data(), malformed.size(), snapshot),
+          "Dell ThermoFanData keeps a structurally valid snapshot with invalid individual readings");
+    Check(!snapshot.cpuTemperatureValid && !snapshot.gpuTemperatureValid &&
+              !snapshot.cpuFanRpmValid && !snapshot.gpuFanRpmValid,
+          "Dell ThermoFanData rejects out-of-range temperatures and fan speeds");
+}
+
+void TestDellThermoFanProviderGatingAndRecovery() {
+    FakeThermoFanDataSource nonDellSource;
+    nonDellSource.manufacturerValue = L"HP";
+    monitor::DellThermoFanWmiProvider nonDell(nonDellSource);
+    monitor::DellThermoFanSnapshot snapshot;
+    Check(!nonDell.Read(snapshot) && nonDellSource.dataReads == 0,
+          "non-Dell provider never queries ThermoFanData");
+    Check(!nonDell.Read(snapshot) && nonDellSource.manufacturerReads == 1 &&
+              nonDellSource.dataReads == 0,
+          "non-Dell eligibility is cached without repeated WMI reads");
+
+    FakeThermoFanDataSource transientSource;
+    transientSource.results = {false, true};
+    monitor::DellThermoFanWmiProvider transient(transientSource);
+    Check(!transient.Read(snapshot),
+          "Dell provider rejects a transient unreadable ThermoFanData sample");
+    Check(!transient.Enabled(),
+          "Dell provider is not enabled while ThermoFanData is unreadable");
+    Check(transient.Read(snapshot) && snapshot.cpuFanRpm == 1940 &&
+              transientSource.dataReads == 2,
+          "Dell provider retries and recovers after a transient ThermoFanData failure");
+    Check(transient.Enabled(),
+          "Dell provider becomes enabled after ThermoFanData is readable");
+
+    FakeThermoFanDataSource manufacturerTransientSource;
+    manufacturerTransientSource.manufacturerResults = {false, true};
+    monitor::DellThermoFanWmiProvider manufacturerTransient(manufacturerTransientSource);
+    Check(!manufacturerTransient.Read(snapshot) && manufacturerTransientSource.dataReads == 0,
+          "provider does not query ThermoFanData when SMBIOS manufacturer is temporarily unreadable");
+    Check(manufacturerTransient.Read(snapshot) && manufacturerTransientSource.manufacturerReads == 2 &&
+              manufacturerTransientSource.dataReads == 1,
+          "provider retries SMBIOS manufacturer detection after a transient query failure");
+
+    FakeThermoFanDataSource malformedSource;
+    malformedSource.snapshot.resize(23);
+    monitor::DellThermoFanWmiProvider malformed(malformedSource);
+    Check(!malformed.Read(snapshot),
+          "Dell provider rejects a malformed WMI snapshot");
+    Check(transientSource.lastManufacturerTimeout ==
+              monitor::DellThermoFanWmiQueryTimeoutMilliseconds &&
+              transientSource.lastDataTimeout == monitor::DellThermoFanWmiQueryTimeoutMilliseconds,
+          "Dell provider bounds manufacturer and ThermoFanData WMI queries");
+}
+
+void TestDellThermoFanDemandGate() {
+    Check(!monitor::ShouldReadInternalThermoFans(monitor::DemandCpuTemperature),
+          "force refresh does not add internal temperature or fan demand");
+    Check(monitor::ShouldReadInternalThermoFans(monitor::DemandCpuFanRpm),
+          "an internal fan metric requests the ThermoFanData provider");
+    Check(monitor::ShouldReadInternalThermoFans(monitor::AllSensorDemand),
+          "diagnostic all-sensor demand requests the ThermoFanData provider");
+}
+
 void TestTemperatureConversion() {
     double celsius = 0.0;
     Check(monitor::DecodeTemperatureTenthsKelvin(2981, celsius), "valid ACPI temperature");
@@ -278,6 +465,35 @@ void TestTaskbarBandLayoutTracksValueWidth() {
     Check(first.cells[0].label == L"CPU" && second.cells[0].label == L"CPU",
           "full labels remain fixed");
     Check(second.cells[1].value == L"--\u00B0", "missing GPU uses a placeholder");
+}
+
+void TestInternalSensorDefaultLabels() {
+    monitor::Config config;
+    config.showCpuTemperature = false;
+    config.showGpuTemperature = false;
+    config.showDiskTemperature = false;
+    config.showNetwork = false;
+    config.showPower = false;
+    config.showCpuInternalTemperature = true;
+    config.showGpuInternalTemperature = true;
+    config.showCpuFanRpm = true;
+    config.showGpuFanRpm = true;
+    monitor::SensorSnapshot snapshot;
+    snapshot.cpuInternalTemperature = 63;
+    snapshot.cpuInternalTemperatureValid = true;
+    snapshot.gpuInternalTemperature = 45;
+    snapshot.gpuInternalTemperatureValid = true;
+    snapshot.cpuFanRpm = 1940;
+    snapshot.cpuFanRpmValid = true;
+    snapshot.gpuFanRpm = 2122;
+    snapshot.gpuFanRpmValid = true;
+    const auto layout = monitor::BuildTaskbarLayout(snapshot, config);
+    Check(layout.cells.size() == 4 && layout.cells[0].label == L"CPU INT" &&
+              layout.cells[1].label == L"GPU INT" && layout.cells[2].label == L"CPU FAN" &&
+              layout.cells[3].label == L"GPU FAN",
+          "default layout uses provider-neutral internal sensor labels");
+    Check(layout.cells[2].value == L"1940R" && layout.cells[3].value == L"2122R",
+          "default layout uses compact R fan units");
 }
 
 void TestTwoRowTaskbarLayout() {
@@ -348,6 +564,18 @@ void TestSharedDisplayConfiguration() {
     config.showGpuTemperature = false;
     config.showNetwork = false;
     monitor::SensorSnapshot snapshot;
+    config.showCpuInternalTemperature = true;
+    config.showGpuInternalTemperature = true;
+    config.showCpuFanRpm = true;
+    config.showGpuFanRpm = true;
+    snapshot.cpuInternalTemperature = 63.0;
+    snapshot.cpuInternalTemperatureValid = true;
+    snapshot.gpuInternalTemperature = 45.0;
+    snapshot.gpuInternalTemperatureValid = true;
+    snapshot.cpuFanRpm = 1940.0;
+    snapshot.cpuFanRpmValid = true;
+    snapshot.gpuFanRpm = 2122.0;
+    snapshot.gpuFanRpmValid = true;
     const auto shared = monitor::ToSharedSnapshot(snapshot, config);
     Check(shared.displayMode == 1, "shared snapshot carries compact mode");
     Check((shared.displayFlags & monitor::ShowGpuTemperature) == 0,
@@ -356,6 +584,17 @@ void TestSharedDisplayConfiguration() {
           "shared snapshot carries disabled network metric");
     Check((shared.displayFlags & monitor::ShowCpuTemperature) != 0,
           "shared snapshot carries enabled CPU metric");
+    Check((shared.displayFlags & monitor::ShowCpuInternalTemperature) != 0 &&
+              (shared.displayFlags & monitor::ShowGpuInternalTemperature) != 0 &&
+              (shared.displayFlags & monitor::ShowCpuFanRpm) != 0 &&
+              (shared.displayFlags & monitor::ShowGpuFanRpm) != 0,
+          "shared snapshot carries all Dell metric selections");
+    const auto restored = monitor::FromSharedSnapshot(shared);
+    Check(restored.cpuInternalTemperatureValid && restored.cpuInternalTemperature == 63.0 &&
+              restored.gpuInternalTemperatureValid && restored.gpuInternalTemperature == 45.0 &&
+              restored.cpuFanRpmValid && restored.cpuFanRpm == 1940.0 &&
+              restored.gpuFanRpmValid && restored.gpuFanRpm == 2122.0,
+          "shared snapshot transports all Dell readings to the taskbar band");
 }
 
 void TestBandCommandCarriesDisplayState() {
@@ -397,14 +636,19 @@ void TestConfigFileRoundTrip() {
     monitor::Config written;
     written.path = path;
     written.refreshIntervalMs = 750;
-    written.taskbarFormat = L"CPU:{cpu_temp}";
+    written.taskbarFormat = L"CPU:{cpu_temp} DCPU:{cpu_internal_temp} DGF:{gpu_fan_rpm}";
+    written.showCpuInternalTemperature = true;
+    written.showGpuFanRpm = true;
     Check(written.SaveFile(), "configuration file is written atomically");
 
     monitor::Config loaded;
     loaded.path = path;
     Check(loaded.Load(), "configuration file reloads after atomic write");
     Check(loaded.refreshIntervalMs == 750, "configuration round trip retains collection interval");
-    Check(loaded.taskbarFormat == L"CPU:{cpu_temp}", "configuration round trip retains format");
+    Check(loaded.taskbarFormat == L"CPU:{cpu_temp} DCPU:{cpu_internal_temp} DGF:{gpu_fan_rpm}",
+          "configuration round trip retains format");
+    Check(loaded.showCpuInternalTemperature && loaded.showGpuFanRpm,
+          "configuration round trip retains Dell metric selections");
 
     written.refreshIntervalMs = 1000;
     Check(written.SaveFile(), "configuration file atomically replaces an existing file");
@@ -580,6 +824,26 @@ void TestDiagnosticsText() {
           "diagnostics reports available memory");
     Check(text.find(L"Network: Available") != std::wstring::npos,
           "diagnostics reports available network");
+
+    monitor::SensorCollection dellSensors{
+        {L"cpu.internal.temperature", L"CPU Internal Temperature", monitor::SensorType::Temperature,
+         63.0, true, 1},
+        {L"gpu.internal.temperature", L"GPU Internal Temperature", monitor::SensorType::Temperature,
+         45.0, true, 1},
+        {L"cpu.fan.rpm", L"CPU Fan", monitor::SensorType::Fan, 1940.0, true, 1},
+        {L"gpu.fan.rpm", L"GPU Fan", monitor::SensorType::Fan, 2122.0, true, 1},
+    };
+    const auto dellText = monitor::BuildDiagnosticsText(available, dellSensors);
+    Check(dellText.find(L"CPU internal temperature: 63 C") != std::wstring::npos &&
+              dellText.find(L"GPU internal temperature: 45 C") != std::wstring::npos,
+          "diagnostics displays Dell temperatures without replacing primary readings");
+    Check(dellText.find(L"CPU fan: 1940R") != std::wstring::npos &&
+              dellText.find(L"GPU fan: 2122R") != std::wstring::npos,
+          "diagnostics identifies the Dell CPU and GPU fan readings");
+    dellSensors[1].valid = false;
+    const auto partialDellText = monitor::BuildDiagnosticsText(available, dellSensors);
+    Check(partialDellText.find(L"GPU internal temperature: Unavailable") != std::wstring::npos,
+          "diagnostics treats a sleeping or invalid Dell GPU sensor as unavailable");
 }
 
 void TestThresholdAlertSeverity() {
@@ -690,6 +954,10 @@ void TestSensorDemandSelection() {
     config.showFan = false;
     config.showBattery = false;
     config.showSystemPower = false;
+    config.showCpuInternalTemperature = false;
+    config.showGpuInternalTemperature = false;
+    config.showCpuFanRpm = false;
+    config.showGpuFanRpm = false;
 
     Check(monitor::SensorDemandFromConfig(config) == 0,
           "no selected metrics means no sensor demand");
@@ -725,6 +993,16 @@ void TestSensorDemandSelection() {
           (aliases & monitor::DemandBattery) != 0,
           "format aliases map to their actual sensor groups");
 
+    config.taskbarFormat = L"{cpu_internal_temp} {gpu_fan_rpm}";
+    demand = monitor::SensorDemandFromConfig(config);
+    Check(demand == (monitor::DemandCpuInternalTemperature | monitor::DemandGpuFanRpm),
+          "Dell format variables demand only the Dell ThermoFanData provider");
+    monitor::Config dellSynced;
+    monitor::ApplySensorDemandToMetrics(dellSynced, demand);
+    Check(dellSynced.showCpuInternalTemperature && !dellSynced.showGpuInternalTemperature &&
+              !dellSynced.showCpuFanRpm && dellSynced.showGpuFanRpm,
+          "Dell provider demand synchronizes the referenced Dell metric checkboxes only");
+
     config.taskbarEnabled = false;
     Check(monitor::SensorDemandFromConfig(config) == 0,
           "disabled taskbar suspends all sensor collection");
@@ -757,10 +1035,16 @@ int main() {
     TestAmdTemperatureProviderSafety();
     TestGenericSensorRegistry();
     TestWmiRetryDeadline();
+    TestDellThermoFanSnapshotDecoding();
+    TestDellThermoFanSnapshotValidation();
+    TestDellThermoFanTaskbarFields();
+    TestDellThermoFanProviderGatingAndRecovery();
+    TestDellThermoFanDemandGate();
     TestTemperatureConversion();
     TestIntelMsrTemperature();
     TestIntelRaplPower();
     TestTaskbarBandLayoutTracksValueWidth();
+    TestInternalSensorDefaultLabels();
     TestTwoRowTaskbarLayout();
     TestCompactTaskbarBandLayout();
     TestNetworkSpeedUsesBoundedUnits();

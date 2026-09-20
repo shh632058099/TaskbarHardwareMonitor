@@ -38,6 +38,7 @@ constexpr wchar_t FormatHintText[] =
     L"\r\n"
     L"变量：{cpu_temp} {cpu_usage} {power} {ram_usage} {ram_used} {ram_total}\r\n"
     L"      {gpu_temp} {gpu_usage} {gpu_power} {fan} {vram} {vram_used} {vram_total}\r\n"
+    L"      {cpu_internal_temp} {gpu_internal_temp} {cpu_fan_rpm} {gpu_fan_rpm}\r\n"
     L"      {disk_temp}/{ssd_temp} {disk_read} {disk_write} {down} {up} {cpu_clock}\r\n"
     L"      {battery} {battery_percent} {battery_status} {system_power}\r\n"
     L"精度：{cpu_temp:1} -> 54.3°    {cpu_usage:1} -> 23.0%\r\n"
@@ -93,6 +94,10 @@ constexpr wchar_t HelpText[] =
     L"{gpu_usage}      GPU 占用率\r\n"
     L"{gpu_power}      GPU 功耗\r\n"
     L"{fan}            GPU 风扇百分比\r\n"
+    L"{cpu_internal_temp}  CPU 内部温度\r\n"
+    L"{gpu_internal_temp}  GPU 内部温度\r\n"
+    L"{cpu_fan_rpm}   CPU 风扇转速（显示为 R）\r\n"
+    L"{gpu_fan_rpm}   GPU 风扇转速（显示为 R）\r\n"
     L"{ram_usage}      内存占用率\r\n"
     L"{ram_used}       已用内存\r\n"
     L"{vram}           显存 已用/总量\r\n"
@@ -314,12 +319,14 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
     const wchar_t* const labels[] = {
         L"CPU temperature", L"CPU usage", L"GPU temperature", L"Disk temperature", L"Network",
         L"CPU power", L"RAM usage", L"GPU usage", L"VRAM", L"Disk read/write",
-        L"CPU clock", L"GPU power", L"GPU fan", L"Battery", L"System power"};
-    for (int index = 0; index != 15; ++index) {
-        const int column = index / 5;
-        const int row = index % 5;
+        L"CPU clock", L"GPU power", L"GPU fan", L"Battery", L"System power",
+        L"CPU internal temperature", L"GPU internal temperature", L"CPU fan RPM",
+        L"GPU fan RPM"};
+    for (int index = 0; index != 19; ++index) {
+        const int column = index / 7;
+        const int row = index % 7;
         taskbarChecks_[index] = AddCheck(
-            hwnd_, instance, labels[index], 180 + column * 200, 80 + row * 25,
+            hwnd_, instance, labels[index], 180 + column * 200, 80 + row * 22,
             TaskbarCheckBase + index);
     }
 
@@ -429,8 +436,9 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
         config_->showDiskTemperature, config_->showNetwork, config_->showPower,
         config_->showMemory, config_->showGpuUsage, config_->showVram, config_->showDiskIo,
         config_->showCpuClock, config_->showGpuPower, config_->showFan,
-        config_->showBattery, config_->showSystemPower};
-    for (int index = 0; index != 15; ++index) {
+        config_->showBattery, config_->showSystemPower, config_->showCpuInternalTemperature,
+        config_->showGpuInternalTemperature, config_->showCpuFanRpm, config_->showGpuFanRpm};
+    for (int index = 0; index != 19; ++index) {
         SendMessageW(taskbarChecks_[index], BM_SETCHECK,
                      enabled[index] ? BST_CHECKED : BST_UNCHECKED, 0);
     }
@@ -747,7 +755,7 @@ void SettingsWindow::SyncMetricsFromFormat() {
     const bool custom = format[0] != L'\0';
     if (custom) {
         const std::uint32_t demand = SensorDemandFromFormat(format);
-        for (int index = 0; index != 15; ++index) {
+        for (int index = 0; index != 19; ++index) {
             const bool selected = (demand & SensorDemandForMetricIndex(index)) != 0;
             SendMessageW(taskbarChecks_[index], BM_SETCHECK,
                          selected ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -805,6 +813,14 @@ void SettingsWindow::UpdateFormatPreview() {
     sample.batteryState = BatteryCharging;
     sample.systemPower = 26.0;
     sample.systemPowerValid = true;
+    sample.cpuInternalTemperature = 63.0;
+    sample.cpuInternalTemperatureValid = true;
+    sample.gpuInternalTemperature = 45.0;
+    sample.gpuInternalTemperatureValid = true;
+    sample.cpuFanRpm = 1940.0;
+    sample.cpuFanRpmValid = true;
+    sample.gpuFanRpm = 2122.0;
+    sample.gpuFanRpmValid = true;
     sample.networkValid = true;
     sample.downloadBytesPerSecond = 12ULL * 1024ULL * 1024ULL;
     sample.uploadBytesPerSecond = 2ULL * 1024ULL * 1024ULL;
@@ -861,9 +877,10 @@ void SettingsWindow::RequestDiagnostics() {
     if (owner_) PostMessageW(owner_, WM_APP + 6, 0, 0);
 }
 
-void SettingsWindow::SetDiagnosticsSnapshot(const SensorSnapshot& snapshot) {
+void SettingsWindow::SetDiagnosticsSnapshot(const SensorSnapshot& snapshot,
+                                            const SensorCollection& sensors) {
     if (diagnosticsText_ && IsWindow(diagnosticsText_)) {
-        const auto text = BuildDiagnosticsText(snapshot);
+        const auto text = BuildDiagnosticsText(snapshot, sensors);
         SetWindowTextW(diagnosticsText_, text.c_str());
     }
 }
@@ -888,6 +905,10 @@ void SettingsWindow::SaveAndClose() {
     updated.showFan = SendMessageW(taskbarChecks_[12], BM_GETCHECK, 0, 0) == BST_CHECKED;
     updated.showBattery = SendMessageW(taskbarChecks_[13], BM_GETCHECK, 0, 0) == BST_CHECKED;
     updated.showSystemPower = SendMessageW(taskbarChecks_[14], BM_GETCHECK, 0, 0) == BST_CHECKED;
+    updated.showCpuInternalTemperature = SendMessageW(taskbarChecks_[15], BM_GETCHECK, 0, 0) == BST_CHECKED;
+    updated.showGpuInternalTemperature = SendMessageW(taskbarChecks_[16], BM_GETCHECK, 0, 0) == BST_CHECKED;
+    updated.showCpuFanRpm = SendMessageW(taskbarChecks_[17], BM_GETCHECK, 0, 0) == BST_CHECKED;
+    updated.showGpuFanRpm = SendMessageW(taskbarChecks_[18], BM_GETCHECK, 0, 0) == BST_CHECKED;
     if (diskSource_) {
         const LRESULT selection = SendMessageW(diskSource_, CB_GETCURSEL, 0, 0);
         if (selection != CB_ERR) {

@@ -2,6 +2,7 @@
 
 #include "../config/Config.h"
 #include "../monitor/SensorTypes.h"
+#include "../hardware/Sensor.h"
 
 #include <string>
 #include <cstdint>
@@ -41,6 +42,7 @@ std::wstring FormatBattery(const SensorSnapshot&, bool compact = false);
 std::wstring FormatBatteryStatus(std::uint32_t state);
 std::wstring ValidateTaskbarFormat(const std::wstring& format);
 std::wstring BuildDiagnosticsText(const SensorSnapshot&);
+std::wstring BuildDiagnosticsText(const SensorSnapshot&, const SensorCollection&);
 TaskbarLayout BuildTaskbarLayout(const SensorSnapshot&, const Config&);
 TaskbarTextLayout BuildFormattedTaskbarLayout(const SensorSnapshot&, const std::wstring& format,
                                                const Config* config = nullptr);

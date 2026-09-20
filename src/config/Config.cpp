@@ -316,6 +316,10 @@ bool Config::Load() {
     showFan = HasTrue(text, "show_fan");
     showBattery = HasTrue(text, "show_battery");
     showSystemPower = HasTrue(text, "show_system_power");
+    showCpuInternalTemperature = HasTrue(text, "show_cpu_internal_temperature");
+    showGpuInternalTemperature = HasTrue(text, "show_gpu_internal_temperature");
+    showCpuFanRpm = HasTrue(text, "show_cpu_fan_rpm");
+    showGpuFanRpm = HasTrue(text, "show_gpu_fan_rpm");
     taskbarValueColorCustom = HasTrue(text, "value_color_custom");
     thresholdColorsEnabled = HasTrue(text, "threshold_colors_enabled");
     const auto colorPosition = text.find("\"value_color\"");
@@ -410,7 +414,11 @@ bool Config::SaveFile() const {
          << ",\n    \"show_gpu_power\": " << (showGpuPower ? "true" : "false")
          << ",\n    \"show_fan\": " << (showFan ? "true" : "false")
          << ",\n    \"show_battery\": " << (showBattery ? "true" : "false")
-         << ",\n    \"show_system_power\": " << (showSystemPower ? "true" : "false")
+    << ",\n    \"show_system_power\": " << (showSystemPower ? "true" : "false")
+         << ",\n    \"show_cpu_internal_temperature\": " << (showCpuInternalTemperature ? "true" : "false")
+         << ",\n    \"show_gpu_internal_temperature\": " << (showGpuInternalTemperature ? "true" : "false")
+         << ",\n    \"show_cpu_fan_rpm\": " << (showCpuFanRpm ? "true" : "false")
+         << ",\n    \"show_gpu_fan_rpm\": " << (showGpuFanRpm ? "true" : "false")
          << ",\n    \"value_color_custom\": " << (taskbarValueColorCustom ? "true" : "false")
          << ",\n    \"value_color\": " << taskbarValueColor
          << ",\n    \"threshold_colors_enabled\": " << (thresholdColorsEnabled ? "true" : "false")

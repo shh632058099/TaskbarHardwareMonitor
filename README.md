@@ -128,6 +128,10 @@ Collection interval (ms)
 {vram_total}      总显存
 {gpu_power}       GPU 功耗
 {fan}             GPU 风扇
+{cpu_internal_temp}   CPU 内部温度
+{gpu_internal_temp}   GPU 内部温度
+{cpu_fan_rpm}    CPU 风扇转速（显示为 R）
+{gpu_fan_rpm}    GPU 风扇转速（显示为 R）
 {disk_temp}       磁盘温度
 {ssd_temp}        磁盘温度兼容别名
 {disk_read}       磁盘读取速度

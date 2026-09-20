@@ -2,6 +2,7 @@
 
 #include "../config/Config.h"
 #include "../monitor/SensorTypes.h"
+#include "../hardware/Sensor.h"
 
 #include <windows.h>
 
@@ -10,7 +11,7 @@ namespace monitor {
 class SettingsWindow {
 public:
     bool Show(HINSTANCE instance, HWND owner, Config* config);
-    void SetDiagnosticsSnapshot(const SensorSnapshot&);
+    void SetDiagnosticsSnapshot(const SensorSnapshot&, const SensorCollection&);
 
 private:
     static LRESULT CALLBACK Proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
@@ -61,7 +62,7 @@ private:
     HWND batteryCriticalEdit_{};
     HWND warningColorPreview_{};
     HWND criticalColorPreview_{};
-    HWND taskbarChecks_[15]{};
+    HWND taskbarChecks_[19]{};
     HWND owner_{};
     HFONT uiFont_{};
     Config* config_{};

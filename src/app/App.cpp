@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <algorithm>
+#include <utility>
 
 namespace monitor {
 
@@ -86,6 +87,10 @@ void App::Worker() {
                     config_.showFan = (command.displayFlags & ShowFan) != 0;
                     config_.showBattery = (command.displayFlags & ShowBattery) != 0;
                     config_.showSystemPower = (command.displayFlags & ShowSystemPower) != 0;
+                    config_.showCpuInternalTemperature = (command.displayFlags & ShowCpuInternalTemperature) != 0;
+                    config_.showGpuInternalTemperature = (command.displayFlags & ShowGpuInternalTemperature) != 0;
+                    config_.showCpuFanRpm = (command.displayFlags & ShowCpuFanRpm) != 0;
+                    config_.showGpuFanRpm = (command.displayFlags & ShowGpuFanRpm) != 0;
                 }
                 commandRequestsRefresh = true;
                 commandChangesConfig = true;
@@ -138,7 +143,8 @@ void App::Worker() {
                 snapshotPublisher_.Publish(sample, config_);
             }
             lastPublishTick = GetTickCount64();
-            auto* result = new SensorSnapshot(sample);
+            auto* result = new std::pair<SensorSnapshot, SensorCollection>(
+                sample, sensors_.GenericSensors());
             if (!PostMessageW(hwnd_, WM_APP + 7, 0, reinterpret_cast<LPARAM>(result))) delete result;
             diagnosticsSecondSamplePending_ = false;
         } else if (collectionDue) {
@@ -246,10 +252,10 @@ LRESULT CALLBACK App::Proc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
         return 0;
     }
     if (self && message == WM_APP + 7) {
-        auto* snapshot = reinterpret_cast<SensorSnapshot*>(lParam);
-        if (snapshot) {
-            self->settings_.SetDiagnosticsSnapshot(*snapshot);
-            delete snapshot;
+        auto* result = reinterpret_cast<std::pair<SensorSnapshot, SensorCollection>*>(lParam);
+        if (result) {
+            self->settings_.SetDiagnosticsSnapshot(result->first, result->second);
+            delete result;
         }
         return 0;
     }

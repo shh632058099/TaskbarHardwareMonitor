@@ -29,7 +29,7 @@ bool SharedSnapshotPublisher::Open() {
     }
     if (newSnapshotMapping) {
         *snapshot_ = {};
-        snapshot_->version = 2;
+        snapshot_->version = 3;
     }
     snapshotEvent_ = CreateEventW(nullptr, FALSE, FALSE, SharedSensorEventName);
     commandEvent_ = CreateEventW(nullptr, FALSE, FALSE, SharedBandCommandEventName);

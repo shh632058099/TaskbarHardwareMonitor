@@ -47,5 +47,13 @@ struct SensorSnapshot {
     std::uint32_t batteryState = 0;
     double systemPower = 0.0;
     bool systemPowerValid = false;
+    double cpuInternalTemperature = 0.0;
+    bool cpuInternalTemperatureValid = false;
+    double gpuInternalTemperature = 0.0;
+    bool gpuInternalTemperatureValid = false;
+    double cpuFanRpm = 0.0;
+    bool cpuFanRpmValid = false;
+    double gpuFanRpm = 0.0;
+    bool gpuFanRpmValid = false;
 };
 }

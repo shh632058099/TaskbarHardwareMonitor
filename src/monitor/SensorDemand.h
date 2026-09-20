@@ -23,12 +23,21 @@ enum SensorDemandFlag : std::uint32_t {
     DemandFan            = 1u << 12,
     DemandBattery        = 1u << 13,
     DemandSystemPower    = 1u << 14,
+    DemandCpuInternalTemperature = 1u << 15,
+    DemandGpuInternalTemperature = 1u << 16,
+    DemandCpuFanRpm         = 1u << 17,
+    DemandGpuFanRpm         = 1u << 18,
 };
 
 constexpr std::uint32_t AllSensorDemand = DemandCpuTemperature | DemandCpuUsage |
     DemandGpuTemperature | DemandDiskTemperature | DemandNetwork | DemandCpuPower |
     DemandMemory | DemandGpuUsage | DemandVram | DemandDiskIo | DemandCpuClock |
-    DemandGpuPower | DemandFan | DemandBattery | DemandSystemPower;
+    DemandGpuPower | DemandFan | DemandBattery | DemandSystemPower |
+    DemandCpuInternalTemperature | DemandGpuInternalTemperature |
+    DemandCpuFanRpm | DemandGpuFanRpm;
+
+constexpr std::uint32_t DemandInternalThermoFans = DemandCpuInternalTemperature |
+    DemandGpuInternalTemperature | DemandCpuFanRpm | DemandGpuFanRpm;
 
 inline bool HasSensorDemand(std::uint32_t demand, SensorDemandFlag flag) {
     return (demand & static_cast<std::uint32_t>(flag)) != 0;
