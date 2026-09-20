@@ -5,9 +5,11 @@
 #include "../src/monitor/SensorDemand.h"
 #include "../src/ui/TaskbarLayout.h"
 #include "../src/ipc/SharedSensorSnapshot.h"
+#include "../src/app/App.h"
 
 #include <cmath>
 #include <iostream>
+#include <windows.h>
 
 namespace {
 
@@ -189,6 +191,50 @@ void TestTaskbarConfigurationDefaults() {
           "all taskbar metrics are enabled by default");
 }
 
+void TestConfigFileRoundTrip() {
+    wchar_t directory[MAX_PATH]{};
+    const DWORD length = GetTempPathW(_countof(directory), directory);
+    Check(length > 0 && length < _countof(directory), "temporary directory is available");
+    if (length == 0 || length >= _countof(directory)) return;
+
+    const std::wstring path = std::wstring(directory) + L"TaskbarHardwareMonitor-config-test.json";
+    DeleteFileW(path.c_str());
+    DeleteFileW((path + L".tmp").c_str());
+
+    monitor::Config written;
+    written.path = path;
+    written.refreshIntervalMs = 750;
+    written.taskbarFormat = L"CPU:{cpu_temp}";
+    Check(written.SaveFile(), "configuration file is written atomically");
+
+    monitor::Config loaded;
+    loaded.path = path;
+    Check(loaded.Load(), "configuration file reloads after atomic write");
+    Check(loaded.refreshIntervalMs == 750, "configuration round trip retains collection interval");
+    Check(loaded.taskbarFormat == L"CPU:{cpu_temp}", "configuration round trip retains format");
+
+    written.refreshIntervalMs = 1000;
+    Check(written.SaveFile(), "configuration file atomically replaces an existing file");
+    monitor::Config replaced;
+    replaced.path = path;
+    Check(replaced.Load() && replaced.refreshIntervalMs == 1000,
+          "atomic replacement makes the new complete configuration visible");
+
+    DeleteFileW(path.c_str());
+    DeleteFileW((path + L".tmp").c_str());
+}
+
+void TestDeferredConfigSaveDeadline() {
+    Check(monitor::MillisecondsUntilConfigSave(500, 1000, true) == 500,
+          "pending configuration save waits until debounce deadline");
+    Check(monitor::MillisecondsUntilConfigSave(1000, 1000, true) == 0,
+          "configuration save is due at debounce deadline");
+    Check(monitor::MillisecondsUntilConfigSave(1001, 1000, true) == 0,
+          "configuration save remains due after debounce deadline");
+    Check(monitor::MillisecondsUntilConfigSave(500, 1000, false) == INFINITE,
+          "non-pending configuration save does not add a wake deadline");
+}
+
 void TestCustomTaskbarFormat() {
     monitor::SensorSnapshot snapshot;
     snapshot.cpuTemperature = 52;
@@ -295,6 +341,41 @@ void TestDisplayFormat2ModifiersAndConditions() {
     Check((demand & monitor::DemandGpuTemperature) != 0 &&
           (demand & monitor::DemandNetwork) != 0,
           "format 2.0 conditions and modifiers keep sensor demand accurate");
+}
+
+void TestTaskbarFormatValidation() {
+    Check(monitor::ValidateTaskbarFormat(L"CPU:{cpu_temp}").empty(),
+          "known display format is valid");
+    Check(monitor::ValidateTaskbarFormat(L"{cpu_temp") == L"Missing closing }",
+          "format reports unmatched opening brace");
+    Check(monitor::ValidateTaskbarFormat(L"cpu_temp}") == L"Unexpected }",
+          "format reports unmatched closing brace");
+    Check(monitor::ValidateTaskbarFormat(L"{gpu_temp?}") == L"Conditional section is empty",
+          "format reports empty conditional section");
+    Check(monitor::ValidateTaskbarFormat(L"{not_a_metric}") == L"Unknown variable: not_a_metric",
+          "format reports unknown variable");
+    Check(monitor::ValidateTaskbarFormat(L"{cpu_temp:mb}") == L"Invalid modifier: mb",
+          "format reports incompatible variable modifier");
+    Check(monitor::ValidateTaskbarFormat(L"{gpu_temp?GPU:{gpu_temp}}").empty(),
+          "format accepts nested conditional variable");
+}
+
+void TestDiagnosticsText() {
+    monitor::SensorSnapshot unavailable;
+    Check(monitor::BuildDiagnosticsText(unavailable).find(L"CPU temperature: Unavailable") != std::wstring::npos,
+          "diagnostics reports unavailable CPU temperature");
+
+    monitor::SensorSnapshot available;
+    available.cpuTemperatureValid = true;
+    available.memoryValid = true;
+    available.networkValid = true;
+    const auto text = monitor::BuildDiagnosticsText(available);
+    Check(text.find(L"CPU temperature: Available") != std::wstring::npos,
+          "diagnostics reports available CPU temperature");
+    Check(text.find(L"Memory: Available") != std::wstring::npos,
+          "diagnostics reports available memory");
+    Check(text.find(L"Network: Available") != std::wstring::npos,
+          "diagnostics reports available network");
 }
 
 void TestThresholdAlertSeverity() {
@@ -480,9 +561,13 @@ int main() {
     TestSharedDisplayConfiguration();
     TestBandCommandCarriesDisplayState();
     TestTaskbarConfigurationDefaults();
+    TestConfigFileRoundTrip();
+    TestDeferredConfigSaveDeadline();
     TestCustomTaskbarFormat();
     TestCustomTaskbarColumns();
     TestDisplayFormat2ModifiersAndConditions();
+    TestTaskbarFormatValidation();
+    TestDiagnosticsText();
     TestThresholdAlertSeverity();
     TestBatteryFormatting();
     TestUnicodeUiText();

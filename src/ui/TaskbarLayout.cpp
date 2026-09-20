@@ -93,10 +93,57 @@ std::wstring Trim(std::wstring value) {
     return value;
 }
 
+std::size_t FindTopLevelQuestion(const std::wstring& expression);
+
 void SplitVariableSpec(const std::wstring& spec, std::wstring& name, std::wstring& modifier) {
     const auto colon = spec.find(L':');
     name = Trim(colon == std::wstring::npos ? spec : spec.substr(0, colon));
     modifier = colon == std::wstring::npos ? std::wstring{} : Trim(spec.substr(colon + 1));
+}
+
+bool IsKnownFormatVariable(const std::wstring& name) {
+    return name == L"cpu_temp" || name == L"cpu_usage" || name == L"gpu_temp" ||
+           name == L"disk_temp" || name == L"ssd_temp" || name == L"down" || name == L"up" ||
+           name == L"power" || name == L"ram_usage" || name == L"ram_used" ||
+           name == L"ram_total" || name == L"gpu_usage" || name == L"vram" ||
+           name == L"vram_used" || name == L"vram_total" || name == L"disk_read" ||
+           name == L"disk_write" || name == L"cpu_clock" || name == L"gpu_power" ||
+           name == L"fan" || name == L"battery" || name == L"battery_percent" ||
+           name == L"battery_status" || name == L"system_power";
+}
+
+bool IsValidFormatModifier(const std::wstring& name, const std::wstring& modifier) {
+    if (modifier.empty()) return true;
+    if (modifier == L"1") {
+        return name == L"cpu_temp" || name == L"cpu_usage" || name == L"gpu_temp" ||
+               name == L"disk_temp" || name == L"ssd_temp" || name == L"power" ||
+               name == L"ram_usage" || name == L"gpu_usage" || name == L"gpu_power" ||
+               name == L"fan" || name == L"battery_percent" || name == L"system_power";
+    }
+    if (modifier == L"short") return name == L"down" || name == L"up" ||
+                                        name == L"disk_read" || name == L"disk_write" ||
+                                        name == L"battery";
+    if (modifier == L"kb" || modifier == L"mb" || modifier == L"gb") {
+        return name == L"down" || name == L"up" || name == L"disk_read" ||
+               name == L"disk_write" || name == L"ram_used" || name == L"ram_total" ||
+               name == L"vram_used" || name == L"vram_total";
+    }
+    return (modifier == L"ghz" || modifier == L"mhz") && name == L"cpu_clock";
+}
+
+std::wstring ValidateFormatExpression(const std::wstring& expression) {
+    const auto question = FindTopLevelQuestion(expression);
+    const std::wstring variable = Trim(expression.substr(0, question));
+    std::wstring name;
+    std::wstring modifier;
+    SplitVariableSpec(variable, name, modifier);
+    if (name.empty()) return L"Variable name is empty";
+    if (!IsKnownFormatVariable(name)) return L"Unknown variable: " + name;
+    if (!IsValidFormatModifier(name, modifier)) return L"Invalid modifier: " + modifier;
+    if (question != std::wstring::npos && Trim(expression.substr(question + 1)).empty()) {
+        return L"Conditional section is empty";
+    }
+    return {};
 }
 
 std::wstring FormatFixed(double value, bool valid, int precision, const wchar_t* unit) {
@@ -551,5 +598,56 @@ std::wstring FormatBattery(const SensorSnapshot& snapshot, bool compact) {
 
 std::wstring FormatTemperature(double value, bool valid) {
     return FormatTemperatureValue(value, valid);
+}
+
+std::wstring ValidateTaskbarFormat(const std::wstring& format) {
+    for (std::size_t index = 0; index < format.size();) {
+        if (format[index] == L'}') return L"Unexpected }";
+        if (format[index] != L'{') {
+            ++index;
+            continue;
+        }
+        const auto end = FindMatchingBrace(format, index);
+        if (end == std::wstring::npos) return L"Missing closing }";
+        const auto error = ValidateFormatExpression(format.substr(index + 1, end - index - 1));
+        if (!error.empty()) return error;
+        const auto question = FindTopLevelQuestion(format.substr(index + 1, end - index - 1));
+        if (question != std::wstring::npos) {
+            const auto expression = format.substr(index + 1, end - index - 1);
+            const auto nested = ValidateTaskbarFormat(expression.substr(question + 1));
+            if (!nested.empty()) return nested;
+        }
+        index = end + 1;
+    }
+    return {};
+}
+
+std::wstring BuildDiagnosticsText(const SensorSnapshot& snapshot) {
+    const auto state = [](bool valid, const wchar_t* unavailable) {
+        return valid ? std::wstring(L"Available") : std::wstring(unavailable);
+    };
+    std::wstring text;
+    auto append = [&](const wchar_t* label, const std::wstring& value) {
+        if (!text.empty()) text += L"\r\n";
+        text += label;
+        text += L": ";
+        text += value;
+    };
+    append(L"CPU temperature", state(snapshot.cpuTemperatureValid, L"Unavailable"));
+    append(L"CPU usage", state(snapshot.cpuUsageValid, L"Unavailable"));
+    append(L"CPU power", state(snapshot.cpuPowerValid, L"Unavailable"));
+    append(L"Memory", state(snapshot.memoryValid, L"Unavailable"));
+    append(L"CPU clock", state(snapshot.cpuClockValid, L"Unavailable"));
+    append(L"Network", state(snapshot.networkValid, L"Unavailable"));
+    append(L"GPU", state(snapshot.gpuTemperatureValid || snapshot.gpuUsageValid ||
+                           snapshot.gpuMemoryValid || snapshot.gpuPowerValid || snapshot.gpuFanValid,
+                           L"Unavailable (driver or supported GPU not found)"));
+    append(L"Disk temperature", state(snapshot.diskTemperatureValid,
+                                       L"Unavailable (no supported drive)"));
+    append(L"Disk I/O", state(snapshot.diskIoValid, L"Unavailable (no supported drive)"));
+    append(L"Battery", state(snapshot.batteryValid, L"Unavailable (no battery or unsupported state)"));
+    append(L"System power", state(snapshot.systemPowerValid,
+                                   L"Unavailable (no battery or unsupported state)"));
+    return text;
 }
 }

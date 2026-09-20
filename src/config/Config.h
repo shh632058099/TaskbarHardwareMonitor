@@ -47,6 +47,7 @@ struct Config {
     bool tabularNumbers = true;
     std::wstring path;
     bool Load();
+    bool SaveFile() const;
     bool Save() const;
     bool ApplyStartupSetting() const;
 };

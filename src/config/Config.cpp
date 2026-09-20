@@ -8,6 +8,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <vector>
 
 namespace monitor {
@@ -383,14 +384,13 @@ bool Config::ApplyStartupSetting() const {
     return ConfigureStartupTask(startWithWindows);
 }
 
-bool Config::Save() const {
-    std::ofstream file(path, std::ios::binary);
-    if (!file) return false;
-    const bool startupConfigured = ApplyStartupSetting();
+bool Config::SaveFile() const {
+    if (path.empty()) return false;
     const std::string adapter = JsonString(networkAdapter);
     const std::string fontName = JsonString(taskbarFontName);
     const std::string taskbarFormatValue = JsonString(taskbarFormat);
-    file << "{\n  \"refresh_interval\": " << refreshIntervalMs
+    std::ostringstream text;
+    text << "{\n  \"refresh_interval\": " << refreshIntervalMs
          << ",\n  \"taskbar\": {\n"
          << "    \"enabled\": " << (taskbarEnabled ? "true" : "false")
          << ",\n    \"display_mode\": \""
@@ -433,7 +433,38 @@ bool Config::Save() const {
          << "\",\n  \"storage_drive\": " << storageDriveIndex
          << ",\n  \"start_with_windows\": "
          << (startWithWindows ? "true" : "false") << "\n}\n";
-    return file.good() && startupConfigured;
+    if (!text.good()) return false;
+
+    const std::wstring temporary = path + L".tmp";
+    {
+        std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+        if (!file) return false;
+        file << text.str();
+        file.flush();
+        if (!file.good()) {
+            file.close();
+            DeleteFileW(temporary.c_str());
+            return false;
+        }
+    }
+
+    if (ReplaceFileW(path.c_str(), temporary.c_str(), nullptr,
+                     REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr)) {
+        return true;
+    }
+    const DWORD replaceError = GetLastError();
+    if (replaceError == ERROR_FILE_NOT_FOUND &&
+        MoveFileExW(temporary.c_str(), path.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        return true;
+    }
+    DeleteFileW(temporary.c_str());
+    return false;
+}
+
+bool Config::Save() const {
+    const bool fileSaved = SaveFile();
+    return fileSaved && ApplyStartupSetting();
 }
 
 } // namespace monitor

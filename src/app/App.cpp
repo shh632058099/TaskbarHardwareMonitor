@@ -60,12 +60,14 @@ void App::Worker() {
 
     while (!stop_) {
         bool commandRequestsRefresh = false;
+        bool commandChangesConfig = false;
         SharedBandCommand command{};
         while (snapshotPublisher_.ReadCommand(command)) {
             std::lock_guard<std::mutex> configLock(configMutex_);
             if (command.action == BandCommandSetDisplay) {
                 config_.displayMode = command.displayMode ? DisplayMode::Compact : DisplayMode::Full;
                 commandRequestsRefresh = true;
+                commandChangesConfig = true;
             } else if (command.action == BandCommandSetMetrics) {
                 config_.taskbarEnabled = (command.displayFlags & TaskbarEnabled) != 0;
                 if (config_.taskbarFormat.empty()) {
@@ -86,6 +88,7 @@ void App::Worker() {
                     config_.showSystemPower = (command.displayFlags & ShowSystemPower) != 0;
                 }
                 commandRequestsRefresh = true;
+                commandChangesConfig = true;
             } else if (command.action == BandCommandOpenSettings) {
                 PostMessageW(hwnd_, WM_APP + 4, 0, 0);
             } else if (command.action == BandCommandExit) {
@@ -94,10 +97,18 @@ void App::Worker() {
         }
 
         bool forceRefresh = commandRequestsRefresh;
+        bool runDiagnostics = false;
         {
             std::lock_guard<std::mutex> lock(wakeMutex_);
             forceRefresh = forceRefresh || refreshRequested_;
             refreshRequested_ = false;
+            runDiagnostics = diagnosticsRequested_;
+            diagnosticsRequested_ = false;
+        }
+
+        if (commandChangesConfig) {
+            configSavePending_ = true;
+            configSaveDeadline_ = GetTickCount64() + 1000;
         }
 
         const ULONGLONG now = GetTickCount64();
@@ -105,7 +116,18 @@ void App::Worker() {
         const bool collectionDue = !haveSample || forceRefresh ||
             now - lastCollectionTick >= collectionInterval;
 
-        if (collectionDue) {
+        if (runDiagnostics) {
+            sample = sensors_.UpdateAll();
+            haveSample = true;
+            lastCollectionTick = GetTickCount64();
+            {
+                std::lock_guard<std::mutex> configLock(configMutex_);
+                snapshotPublisher_.Publish(sample, config_);
+            }
+            lastPublishTick = GetTickCount64();
+            auto* result = new SensorSnapshot(sample);
+            if (!PostMessageW(hwnd_, WM_APP + 7, 0, reinterpret_cast<LPARAM>(result))) delete result;
+        } else if (collectionDue) {
             std::uint32_t demand = 0;
             {
                 std::lock_guard<std::mutex> configLock(configMutex_);
@@ -136,7 +158,21 @@ void App::Worker() {
             ? 0u : static_cast<DWORD>(collectionInterval - collectionElapsed);
         const DWORD untilHeartbeat = publishElapsed >= SnapshotHeartbeatIntervalMs
             ? 0u : static_cast<DWORD>(SnapshotHeartbeatIntervalMs - publishElapsed);
-        const DWORD timeout = (std::min)(untilCollection, untilHeartbeat);
+        if (configSavePending_ && MillisecondsUntilConfigSave(waitStart, configSaveDeadline_, true) == 0) {
+            Config saveCopy;
+            {
+                std::lock_guard<std::mutex> configLock(configMutex_);
+                saveCopy = config_;
+            }
+            if (saveCopy.SaveFile()) {
+                configSavePending_ = false;
+            } else {
+                // Avoid a busy retry loop when the config directory is temporarily unavailable.
+                configSaveDeadline_ = GetTickCount64() + 1000;
+            }
+        }
+        const DWORD untilSave = MillisecondsUntilConfigSave(waitStart, configSaveDeadline_, configSavePending_);
+        const DWORD timeout = (std::min)((std::min)(untilCollection, untilHeartbeat), untilSave);
         snapshotPublisher_.WaitForWake(timeout);
     }
 }
@@ -182,6 +218,22 @@ LRESULT CALLBACK App::Proc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     }
     if (self && message == WM_APP + 5) {
         DestroyWindow(window);
+        return 0;
+    }
+    if (self && message == WM_APP + 6) {
+        {
+            std::lock_guard<std::mutex> lock(self->wakeMutex_);
+            self->diagnosticsRequested_ = true;
+        }
+        self->snapshotPublisher_.Wake();
+        return 0;
+    }
+    if (self && message == WM_APP + 7) {
+        auto* snapshot = reinterpret_cast<SensorSnapshot*>(lParam);
+        if (snapshot) {
+            self->settings_.SetDiagnosticsSnapshot(*snapshot);
+            delete snapshot;
+        }
         return 0;
     }
     if (message == WM_DESTROY) {

@@ -103,9 +103,10 @@ if(BUILD_UNIT_TESTS)
         src/monitor/SensorDemand.cpp
         src/monitor/SensorDemand.h
         src/config/Config.h
+        src/config/Config.cpp
         src/ipc/SharedSensorSnapshot.h
     )
     target_compile_definitions(TaskbarHardwareMonitorTests PRIVATE UNICODE _UNICODE NOMINMAX)
-    target_link_libraries(TaskbarHardwareMonitorTests PRIVATE advapi32)
+    target_link_libraries(TaskbarHardwareMonitorTests PRIVATE advapi32 taskschd ole32 oleaut32)
     add_test(NAME TaskbarHardwareMonitorTests COMMAND TaskbarHardwareMonitorTests)
 endif()

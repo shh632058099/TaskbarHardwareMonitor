@@ -12,6 +12,11 @@
 
 namespace monitor {
 
+inline DWORD MillisecondsUntilConfigSave(ULONGLONG now, ULONGLONG deadline, bool pending) {
+    if (!pending) return INFINITE;
+    return now >= deadline ? 0u : static_cast<DWORD>(deadline - now);
+}
+
 class App {
 public:
     bool Initialize(HINSTANCE instance);
@@ -35,6 +40,9 @@ private:
     std::mutex configMutex_;
     std::mutex wakeMutex_;
     bool refreshRequested_ = false;
+    bool configSavePending_ = false;
+    ULONGLONG configSaveDeadline_ = 0;
+    bool diagnosticsRequested_ = false;
 };
 
 } // namespace monitor

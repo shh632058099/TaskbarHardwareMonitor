@@ -63,17 +63,6 @@ bool SameVisualSnapshot(const SharedSensorSnapshot& a, const SharedSensorSnapsho
            a.displayFlags == b.displayFlags;
 }
 
-bool ReadBandSettingsWriteTime(FILETIME& writeTime) {
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, BandSettingsPath, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
-        return false;
-    }
-    const LSTATUS status = RegQueryInfoKeyW(
-        key, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-        nullptr, nullptr, nullptr, &writeTime);
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS;
-}
 constexpr UINT CommandPower = 1015;
 constexpr UINT CommandMemory = 1016;
 constexpr UINT CommandGpuUsage = 1017;
@@ -87,11 +76,12 @@ constexpr UINT CommandSystemPower = 1024;
 constexpr UINT CommandSettings = 1040;
 constexpr UINT CommandExit = 1041;
 constexpr UINT SnapshotEventMessage = WM_APP + 20;
+constexpr UINT SettingsEventMessage = WM_APP + 21;
 
 bool IsSafeMessage(UINT message) {
-    return message == WM_PAINT || message == WM_TIMER || message == WM_ERASEBKGND ||
+    return message == WM_PAINT || message == WM_ERASEBKGND ||
            message == WM_RBUTTONUP || message == WM_CONTEXTMENU ||
-           message == SnapshotEventMessage;
+           message == SnapshotEventMessage || message == SettingsEventMessage;
 }
 
 void SetBandWidth(HWND window, int width) {
@@ -451,7 +441,6 @@ HRESULT STDMETHODCALLTYPE TaskbarBand::SetSite(IUnknown* site) {
         SafeClose();
         return error;
     }
-    SetTimer(hwnd_, 1, 1000, nullptr);
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES};
     InitCommonControlsEx(&controls);
     tooltip_ = CreateWindowExW(
@@ -468,6 +457,7 @@ HRESULT STDMETHODCALLTYPE TaskbarBand::SetSite(IUnknown* site) {
         SendMessageW(tooltip_, TTM_ADDTOOL, 0, reinterpret_cast<LPARAM>(&tool));
     }
     ConnectSharedMemory();
+    ConnectSettingsNotifications();
     SetBandWidth(hwnd_, 1);
     RefreshSnapshotState(hwnd_, true);
     BandLog(L"SetSite complete");
@@ -572,11 +562,18 @@ HRESULT STDMETHODCALLTYPE TaskbarBand::HasFocusIO() { return S_FALSE; }
 HRESULT STDMETHODCALLTYPE TaskbarBand::TranslateAcceleratorIO(LPMSG) { return S_FALSE; }
 
 void TaskbarBand::SafeClose() {
-    if (hwnd_) KillTimer(hwnd_, 1);
     if (snapshotWait_) {
         UnregisterWaitEx(snapshotWait_, INVALID_HANDLE_VALUE);
         snapshotWait_ = nullptr;
     }
+    if (settingsWait_) {
+        UnregisterWaitEx(settingsWait_, INVALID_HANDLE_VALUE);
+        settingsWait_ = nullptr;
+    }
+    if (settingsEvent_) CloseHandle(settingsEvent_);
+    settingsEvent_ = nullptr;
+    if (settingsKey_) RegCloseKey(settingsKey_);
+    settingsKey_ = nullptr;
     if (tooltip_) DestroyWindow(tooltip_);
     tooltip_ = nullptr;
     if (shared_) UnmapViewOfFile(shared_);
@@ -599,7 +596,6 @@ void TaskbarBand::SafeClose() {
     monitorReady_ = false;
     monitorEnabled_ = false;
     hasLastVisualSnapshot_ = false;
-    hasLastSettingsWriteTime_ = false;
 }
 
 void TaskbarBand::Paint(HDC dc) {
@@ -893,6 +889,34 @@ void TaskbarBand::ConnectSharedMemory() {
     }
 }
 
+void TaskbarBand::ConnectSettingsNotifications() {
+    if (!settingsKey_) {
+        DWORD disposition = 0;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, BandSettingsPath, 0, nullptr,
+                            REG_OPTION_NON_VOLATILE, KEY_NOTIFY | KEY_QUERY_VALUE,
+                            nullptr, &settingsKey_, &disposition) != ERROR_SUCCESS) {
+            settingsKey_ = nullptr;
+            return;
+        }
+    }
+    if (!settingsEvent_) {
+        settingsEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!settingsEvent_) return;
+    }
+    ArmSettingsNotification();
+    if (settingsEvent_ && hwnd_ && !settingsWait_ &&
+        !RegisterWaitForSingleObject(&settingsWait_, settingsEvent_, SettingsEventCallback,
+                                     this, INFINITE, WT_EXECUTEDEFAULT)) {
+        settingsWait_ = nullptr;
+    }
+}
+
+void TaskbarBand::ArmSettingsNotification() {
+    if (!settingsKey_ || !settingsEvent_) return;
+    RegNotifyChangeKeyValue(settingsKey_, FALSE, REG_NOTIFY_CHANGE_LAST_SET,
+                            settingsEvent_, TRUE);
+}
+
 bool TaskbarBand::ReadSnapshot(SharedSensorSnapshot& result) {
     ConnectSharedMemory();
     if (!shared_) return false;
@@ -909,7 +933,7 @@ bool TaskbarBand::ReadSnapshot(SharedSensorSnapshot& result) {
     return false;
 }
 
-void TaskbarBand::RefreshSnapshotState(HWND window, bool checkSettings) {
+void TaskbarBand::RefreshSnapshotState(HWND window, bool settingsChanged) {
     SharedSensorSnapshot snapshot{};
     if (!ReadSnapshot(snapshot)) {
         monitorReady_ = false;
@@ -932,17 +956,6 @@ void TaskbarBand::RefreshSnapshotState(HWND window, bool checkSettings) {
     if (snapshotChanged) {
         lastVisualSnapshot_ = snapshot;
         hasLastVisualSnapshot_ = true;
-    }
-
-    bool settingsChanged = false;
-    if (checkSettings) {
-        FILETIME settingsWriteTime{};
-        if (ReadBandSettingsWriteTime(settingsWriteTime)) {
-            settingsChanged = !hasLastSettingsWriteTime_ ||
-                CompareFileTime(&settingsWriteTime, &lastSettingsWriteTime_) != 0;
-            lastSettingsWriteTime_ = settingsWriteTime;
-            hasLastSettingsWriteTime_ = true;
-        }
     }
 
     if (shouldShow && (snapshotChanged || visibilityChanged || settingsChanged)) {
@@ -984,6 +997,13 @@ VOID CALLBACK TaskbarBand::SnapshotEventCallback(PVOID context, BOOLEAN) {
     if (window) PostMessageW(window, SnapshotEventMessage, 0, 0);
 }
 
+VOID CALLBACK TaskbarBand::SettingsEventCallback(PVOID context, BOOLEAN) {
+    auto* self = static_cast<TaskbarBand*>(context);
+    if (!self) return;
+    self->ArmSettingsNotification();
+    if (self->hwnd_) PostMessageW(self->hwnd_, SettingsEventMessage, 0, 0);
+}
+
 LRESULT CALLBACK TaskbarBand::WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     auto* self = reinterpret_cast<TaskbarBand*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -1008,9 +1028,9 @@ LRESULT TaskbarBand::HandleMessage(HWND window, UINT message, WPARAM wParam, LPA
         return 0;
     }
     if (message == WM_ERASEBKGND) return 1;
-    if (message == WM_TIMER || message == SnapshotEventMessage) {
+    if (message == SnapshotEventMessage || message == SettingsEventMessage) {
         ConnectSharedMemory();
-        RefreshSnapshotState(window, message == WM_TIMER);
+        RefreshSnapshotState(window, message == SettingsEventMessage);
         return 0;
     }
     if (message != WM_RBUTTONUP && message != WM_CONTEXTMENU) {

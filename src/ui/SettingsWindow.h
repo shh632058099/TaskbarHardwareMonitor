@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../config/Config.h"
+#include "../monitor/SensorTypes.h"
 
 #include <windows.h>
 
@@ -9,6 +10,7 @@ namespace monitor {
 class SettingsWindow {
 public:
     bool Show(HINSTANCE instance, HWND owner, Config* config);
+    void SetDiagnosticsSnapshot(const SensorSnapshot&);
 
 private:
     static LRESULT CALLBACK Proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
@@ -30,6 +32,8 @@ private:
     void ResetTaskbarFormat();
     void UpdateFormatPreview();
     void SyncMetricsFromFormat();
+    void ShowDiagnostics();
+    void RequestDiagnostics();
 
     HWND hwnd_{};
     HWND interval_{};
@@ -41,8 +45,11 @@ private:
     HWND fontDisplay_{};
     HWND formatEdit_{};
     HWND formatPreview_{};
+    HWND formatStatus_{};
     HWND formatHint_{};
     HWND helpWindow_{};
+    HWND diagnosticsWindow_{};
+    HWND diagnosticsText_{};
     HWND alertWindow_{};
     HWND alertEnabled_{};
     HWND cpuWarning_{};

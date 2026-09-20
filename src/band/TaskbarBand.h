@@ -45,10 +45,13 @@ public:
 private:
     static LRESULT CALLBACK WindowProc(HWND, UINT, WPARAM, LPARAM);
     static VOID CALLBACK SnapshotEventCallback(PVOID, BOOLEAN);
+    static VOID CALLBACK SettingsEventCallback(PVOID, BOOLEAN);
     LRESULT HandleMessage(HWND, UINT, WPARAM, LPARAM);
     bool ReadSnapshot(SharedSensorSnapshot&);
     void ConnectSharedMemory();
-    void RefreshSnapshotState(HWND, bool checkSettings);
+    void ConnectSettingsNotifications();
+    void ArmSettingsNotification();
+    void RefreshSnapshotState(HWND, bool settingsChanged = false);
     void Paint(HDC);
     void SafeClose();
     void UpdateBandSize(int width);
@@ -63,12 +66,13 @@ private:
     HANDLE snapshotEvent_{};
     HANDLE commandEvent_{};
     HANDLE snapshotWait_{};
+    HKEY settingsKey_{};
+    HANDLE settingsEvent_{};
+    HANDLE settingsWait_{};
     HWND tooltip_{};
     std::wstring tooltipText_;
     SharedSensorSnapshot lastVisualSnapshot_{};
     bool hasLastVisualSnapshot_ = false;
-    FILETIME lastSettingsWriteTime_{};
-    bool hasLastSettingsWriteTime_ = false;
     bool shellShowRequested_ = true;
     bool monitorReady_ = false;
     bool monitorEnabled_ = false;

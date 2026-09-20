@@ -22,6 +22,9 @@ constexpr int FormatVariablesId = 321;
 constexpr int FormatResetId = 322;
 constexpr int HelpId = 323;
 constexpr int HelpCloseId = 324;
+constexpr int DiagnosticsId = 326;
+constexpr int DiagnosticsRefreshId = 327;
+constexpr int DiagnosticsCloseId = 328;
 constexpr int AlertSettingsId = 325;
 constexpr int AlertSaveId = 400;
 constexpr int AlertCancelId = 401;
@@ -370,6 +373,8 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
                   24, 442, 145, 20, hwnd_, nullptr, instance, nullptr);
     formatPreview_ = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
                                    180, 440, 600, 48, hwnd_, nullptr, instance, nullptr);
+    formatStatus_ = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                                  180, 488, 600, 20, hwnd_, nullptr, instance, nullptr);
     formatHint_ = CreateWindowExW(
         WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", FormatHintText,
         WS_POPUP | WS_BORDER | SS_LEFT | SS_NOPREFIX,
@@ -383,10 +388,10 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
     UpdateFormatPreview();
 
     CreateWindowW(L"STATIC", L"Disk temperature:", WS_CHILD | WS_VISIBLE,
-                  24, 510, 145, 20, hwnd_, nullptr, instance, nullptr);
+                  24, 515, 145, 20, hwnd_, nullptr, instance, nullptr);
     diskSource_ = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER |
                                 CBS_DROPDOWNLIST | WS_VSCROLL,
-                                 180, 505, 600, 220, hwnd_, nullptr, instance, nullptr);
+                                180, 510, 600, 220, hwnd_, nullptr, instance, nullptr);
     const int autoItem = static_cast<int>(SendMessageW(
         diskSource_, CB_ADDSTRING, 0,
         reinterpret_cast<LPARAM>(L"Auto (prefer NVMe/SSD)")));
@@ -413,10 +418,10 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
 
     interval_ = CreateWindowW(L"EDIT", std::to_wstring(config_->refreshIntervalMs).c_str(),
                               WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
-                              180, 550, 90, 24, hwnd_, nullptr, instance, nullptr);
+                              180, 555, 90, 24, hwnd_, nullptr, instance, nullptr);
     CreateWindowW(L"STATIC", L"Collection interval (ms):", WS_CHILD | WS_VISIBLE,
-                  24, 554, 145, 20, hwnd_, nullptr, instance, nullptr);
-    startup_ = AddCheck(hwnd_, instance, L"Start with Windows", 24, 585, 0);
+                  24, 559, 145, 20, hwnd_, nullptr, instance, nullptr);
+    startup_ = AddCheck(hwnd_, instance, L"Start with Windows", 24, 590, 0);
     SendMessageW(taskbarEnabled_, BM_SETCHECK,
                  config_->taskbarEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
     const bool enabled[] = {
@@ -435,6 +440,9 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
     CreateWindowW(L"BUTTON", L"Help...", WS_CHILD | WS_VISIBLE,
                   24, 650, 80, 26, hwnd_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(HelpId)), instance, nullptr);
+    CreateWindowW(L"BUTTON", L"Diagnostics...", WS_CHILD | WS_VISIBLE,
+                  114, 650, 100, 26, hwnd_,
+                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(DiagnosticsId)), instance, nullptr);
     CreateWindowW(L"BUTTON", L"Save", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
                   650, 650, 65, 26, hwnd_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(SaveId)), instance, nullptr);
@@ -801,8 +809,12 @@ void SettingsWindow::UpdateFormatPreview() {
     SyncMetricsFromFormat();
     if (format[0] == L'\0') {
         SetWindowTextW(formatPreview_, L"(Default Full/Compact layout)");
+        if (formatStatus_) SetWindowTextW(formatStatus_, L"");
         return;
     }
+    const auto validation = ValidateTaskbarFormat(format);
+    if (formatStatus_) SetWindowTextW(formatStatus_,
+                                      validation.empty() ? L"Format valid" : validation.c_str());
     SensorSnapshot sample{};
     sample.cpuTemperature = 54.0;
     sample.cpuTemperatureValid = true;
@@ -855,6 +867,49 @@ void SettingsWindow::UpdateFormatPreview() {
         }
     }
     SetWindowTextW(formatPreview_, text.c_str());
+}
+
+void SettingsWindow::ShowDiagnostics() {
+    if (diagnosticsWindow_) {
+        ActivateSettingsWindow(diagnosticsWindow_);
+        return;
+    }
+    HINSTANCE instance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd_, GWLP_HINSTANCE));
+    WNDCLASSW windowClass{};
+    windowClass.lpfnWndProc = Proc;
+    windowClass.hInstance = instance;
+    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    windowClass.lpszClassName = L"MonitorDiagnosticsWindow";
+    RegisterClassW(&windowClass);
+    diagnosticsWindow_ = CreateWindowExW(WS_EX_DLGMODALFRAME, windowClass.lpszClassName,
+                                         L"Hardware diagnostics", WS_OVERLAPPED | WS_CAPTION |
+                                         WS_SYSMENU | WS_VISIBLE,
+                                         CW_USEDEFAULT, CW_USEDEFAULT, 520, 400, hwnd_, nullptr,
+                                         instance, this);
+    if (!diagnosticsWindow_) return;
+    diagnosticsText_ = CreateWindowW(L"EDIT", L"Click Re-detect to check hardware sensors.",
+                                     WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE |
+                                     ES_READONLY | WS_VSCROLL, 16, 16, 470, 280,
+                                     diagnosticsWindow_, nullptr, instance, nullptr);
+    CreateWindowW(L"BUTTON", L"Re-detect", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                  305, 315, 85, 26, diagnosticsWindow_,
+                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(DiagnosticsRefreshId)), instance, nullptr);
+    CreateWindowW(L"BUTTON", L"Close", WS_CHILD | WS_VISIBLE,
+                  400, 315, 85, 26, diagnosticsWindow_,
+                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(DiagnosticsCloseId)), instance, nullptr);
+    ApplyTheme(diagnosticsWindow_, uiFont_);
+}
+
+void SettingsWindow::RequestDiagnostics() {
+    if (diagnosticsText_) SetWindowTextW(diagnosticsText_, L"Detecting hardware sensors...");
+    if (owner_) PostMessageW(owner_, WM_APP + 6, 0, 0);
+}
+
+void SettingsWindow::SetDiagnosticsSnapshot(const SensorSnapshot& snapshot) {
+    if (diagnosticsText_ && IsWindow(diagnosticsText_)) {
+        const auto text = BuildDiagnosticsText(snapshot);
+        SetWindowTextW(diagnosticsText_, text.c_str());
+    }
 }
 
 void SettingsWindow::SaveAndClose() {
@@ -1053,6 +1108,9 @@ LRESULT CALLBACK SettingsWindow::Proc(HWND window, UINT message, WPARAM wParam, 
         if (LOWORD(wParam) == FormatVariablesId) self->ShowFormatVariables();
         if (LOWORD(wParam) == FormatResetId) self->ResetTaskbarFormat();
         if (LOWORD(wParam) == HelpId) self->ShowHelp();
+        if (LOWORD(wParam) == DiagnosticsId) self->ShowDiagnostics();
+        if (LOWORD(wParam) == DiagnosticsRefreshId) self->RequestDiagnostics();
+        if (LOWORD(wParam) == DiagnosticsCloseId && window == self->diagnosticsWindow_) DestroyWindow(window);
         if (LOWORD(wParam) == FormatEditId) {
             if (HIWORD(wParam) == EN_SETFOCUS) self->ShowFormatHint();
             if (HIWORD(wParam) == EN_KILLFOCUS) self->HideFormatHint();
@@ -1100,6 +1158,16 @@ LRESULT CALLBACK SettingsWindow::Proc(HWND window, UINT message, WPARAM wParam, 
         return 0;
     }
     if (message == WM_DESTROY && self) {
+        if (self->diagnosticsWindow_ == window) {
+            self->diagnosticsWindow_ = nullptr;
+            self->diagnosticsText_ = nullptr;
+            return 0;
+        }
+        if (self->diagnosticsWindow_ && IsWindow(self->diagnosticsWindow_)) {
+            DestroyWindow(self->diagnosticsWindow_);
+        }
+        self->diagnosticsWindow_ = nullptr;
+        self->diagnosticsText_ = nullptr;
         if (self->alertWindow_ && IsWindow(self->alertWindow_)) DestroyWindow(self->alertWindow_);
         self->alertWindow_ = nullptr;
         if (self->helpWindow_ && IsWindow(self->helpWindow_)) DestroyWindow(self->helpWindow_);

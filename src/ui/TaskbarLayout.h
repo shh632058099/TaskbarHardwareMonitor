@@ -39,6 +39,8 @@ std::wstring FormatNetworkSpeed(std::uint64_t bytesPerSecond);
 std::wstring FormatTemperature(double value, bool valid);
 std::wstring FormatBattery(const SensorSnapshot&, bool compact = false);
 std::wstring FormatBatteryStatus(std::uint32_t state);
+std::wstring ValidateTaskbarFormat(const std::wstring& format);
+std::wstring BuildDiagnosticsText(const SensorSnapshot&);
 TaskbarLayout BuildTaskbarLayout(const SensorSnapshot&, const Config&);
 TaskbarTextLayout BuildFormattedTaskbarLayout(const SensorSnapshot&, const std::wstring& format,
                                                const Config* config = nullptr);

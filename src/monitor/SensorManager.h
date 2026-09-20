@@ -12,6 +12,7 @@ public:
     void SetNetworkAdapter(const std::wstring& adapter) { network_.SetAdapter(adapter); }
     void SetStorageDrive(int index) { storage_.SetDriveIndex(index); }
     SensorSnapshot Update(std::uint32_t demand, bool forceRefresh = false);
+    SensorSnapshot UpdateAll() { return Update(AllSensorDemand, true); }
 private:
     CpuMonitor cpu_;
     NetworkMonitor network_;

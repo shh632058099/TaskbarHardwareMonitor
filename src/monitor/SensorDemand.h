@@ -25,6 +25,11 @@ enum SensorDemandFlag : std::uint32_t {
     DemandSystemPower    = 1u << 14,
 };
 
+constexpr std::uint32_t AllSensorDemand = DemandCpuTemperature | DemandCpuUsage |
+    DemandGpuTemperature | DemandDiskTemperature | DemandNetwork | DemandCpuPower |
+    DemandMemory | DemandGpuUsage | DemandVram | DemandDiskIo | DemandCpuClock |
+    DemandGpuPower | DemandFan | DemandBattery | DemandSystemPower;
+
 inline bool HasSensorDemand(std::uint32_t demand, SensorDemandFlag flag) {
     return (demand & static_cast<std::uint32_t>(flag)) != 0;
 }
