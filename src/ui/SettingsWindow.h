@@ -21,7 +21,6 @@ private:
     void SetAutomaticValueColor();
     void ChooseTaskbarFont();
     void UpdateFontDisplay();
-    void ShowFormatVariables();
     void ShowHelp();
     void ShowThresholdSettings();
     void SaveThresholdSettings();

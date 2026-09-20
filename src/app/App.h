@@ -12,6 +12,8 @@
 
 namespace monitor {
 
+constexpr ULONGLONG DiagnosticsSecondSampleDelayMs = 500;
+
 inline DWORD MillisecondsUntilConfigSave(ULONGLONG now, ULONGLONG deadline, bool pending) {
     if (!pending) return INFINITE;
     return now >= deadline ? 0u : static_cast<DWORD>(deadline - now);
@@ -43,6 +45,8 @@ private:
     bool configSavePending_ = false;
     ULONGLONG configSaveDeadline_ = 0;
     bool diagnosticsRequested_ = false;
+    bool diagnosticsSecondSamplePending_ = false;
+    ULONGLONG diagnosticsSecondSampleDeadline_ = 0;
 };
 
 } // namespace monitor

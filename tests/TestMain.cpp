@@ -235,6 +235,13 @@ void TestDeferredConfigSaveDeadline() {
           "non-pending configuration save does not add a wake deadline");
 }
 
+void TestDiagnosticsSecondSampleDeadline() {
+    Check(monitor::MillisecondsUntilConfigSave(500, 1000, true) == 500,
+          "diagnostic second sample can use the worker deadline helper");
+    Check(monitor::DiagnosticsSecondSampleDelayMs >= 250,
+          "diagnostic disk I/O second sample allows measurable elapsed time");
+}
+
 void TestCustomTaskbarFormat() {
     monitor::SensorSnapshot snapshot;
     snapshot.cpuTemperature = 52;
@@ -364,6 +371,10 @@ void TestDiagnosticsText() {
     monitor::SensorSnapshot unavailable;
     Check(monitor::BuildDiagnosticsText(unavailable).find(L"CPU temperature: Unavailable") != std::wstring::npos,
           "diagnostics reports unavailable CPU temperature");
+    Check(monitor::BuildDiagnosticsText(unavailable).find(
+              L"Disk I/O: Unavailable (needs a second sample, or disk performance counters are unavailable)") !=
+              std::wstring::npos,
+          "diagnostics explains disk I/O requires two samples or supported counters");
 
     monitor::SensorSnapshot available;
     available.cpuTemperatureValid = true;
@@ -563,6 +574,7 @@ int main() {
     TestTaskbarConfigurationDefaults();
     TestConfigFileRoundTrip();
     TestDeferredConfigSaveDeadline();
+    TestDiagnosticsSecondSampleDeadline();
     TestCustomTaskbarFormat();
     TestCustomTaskbarColumns();
     TestDisplayFormat2ModifiersAndConditions();

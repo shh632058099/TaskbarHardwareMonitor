@@ -18,7 +18,6 @@ constexpr int ValueColorAutoId = 301;
 constexpr int ValueColorPreviewId = 302;
 constexpr int FontChooseId = 310;
 constexpr int FormatEditId = 320;
-constexpr int FormatVariablesId = 321;
 constexpr int FormatResetId = 322;
 constexpr int HelpId = 323;
 constexpr int HelpCloseId = 324;
@@ -34,12 +33,15 @@ constexpr int CriticalColorChooseId = 411;
 constexpr int WarningColorPreviewId = 412;
 constexpr int CriticalColorPreviewId = 413;
 constexpr wchar_t FormatHintText[] =
-    L"Display format 2.0 - 快捷说明\r\n"
+    L"Display format 2.0\r\n"
     L"Enter / \\n = 第二行    \\t = 下一对齐列\r\n"
     L"\r\n"
-    L"普通变量：{cpu_temp}  {cpu_usage}  {ram_usage}  {down}  {up}\r\n"
+    L"变量：{cpu_temp} {cpu_usage} {power} {ram_usage} {ram_used} {ram_total}\r\n"
+    L"      {gpu_temp} {gpu_usage} {gpu_power} {fan} {vram} {vram_used} {vram_total}\r\n"
+    L"      {disk_temp}/{ssd_temp} {disk_read} {disk_write} {down} {up} {cpu_clock}\r\n"
+    L"      {battery} {battery_percent} {battery_status} {system_power}\r\n"
     L"精度：{cpu_temp:1} -> 54.3°    {cpu_usage:1} -> 23.0%\r\n"
-    L"单位：{cpu_clock:ghz}  {ram_used:gb}  {down:mb}  {down:short}\r\n"
+    L"单位：{cpu_clock:ghz}  {ram_used:gb}  {down:kb|mb|gb}  {down:short}\r\n"
     L"条件段：{gpu_temp?GPU:{gpu_temp}}\r\n"
     L"        只有 GPU 温度有效时才显示整个 GPU 段\r\n"
     L"\r\n"
@@ -363,9 +365,6 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
                                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(FormatEditId)),
                                 instance, nullptr);
     SendMessageW(formatEdit_, EM_SETLIMITTEXT, 4095, 0);
-    CreateWindowW(L"BUTTON", L"Variables...", WS_CHILD | WS_VISIBLE,
-                  590, 402, 95, 26, hwnd_,
-                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(FormatVariablesId)), instance, nullptr);
     CreateWindowW(L"BUTTON", L"Default", WS_CHILD | WS_VISIBLE,
                   695, 402, 85, 26, hwnd_,
                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(FormatResetId)), instance, nullptr);
@@ -376,9 +375,10 @@ bool SettingsWindow::Show(HINSTANCE instance, HWND owner, Config* config) {
     formatStatus_ = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
                                   180, 488, 600, 20, hwnd_, nullptr, instance, nullptr);
     formatHint_ = CreateWindowExW(
-        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", FormatHintText,
-        WS_POPUP | WS_BORDER | SS_LEFT | SS_NOPREFIX,
-        0, 0, 610, 160, hwnd_, nullptr, instance, nullptr);
+        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_CLIENTEDGE, L"EDIT", FormatHintText,
+        WS_POPUP | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY |
+            ES_NOHIDESEL,
+        0, 0, 760, 215, hwnd_, nullptr, instance, nullptr);
     if (formatHint_) {
         const HFONT hintFont = uiFont_ ? uiFont_ :
             reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -704,56 +704,12 @@ void SettingsWindow::ShowHelp() {
     ActivateSettingsWindow(helpWindow_);
 }
 
-void SettingsWindow::ShowFormatVariables() {
-    MessageBoxW(hwnd_,
-        L"Available variables:\n\n"
-        L"{cpu_temp}   CPU temperature, e.g. 54\u00B0\n"
-        L"{cpu_usage}  CPU usage, e.g. 23%\n"
-        L"{gpu_temp}   GPU temperature\n"
-        L"{disk_temp}  Disk temperature\n"
-        L"{ssd_temp}   Disk temperature (legacy alias)\n"
-        L"{down}       Download speed\n"
-        L"{up}         Upload speed\n"
-        L"{power}      CPU power\n"
-        L"{ram_usage}  RAM usage\n"
-        L"{ram_used}   RAM used\n"
-        L"{ram_total}  RAM total\n"
-        L"{gpu_usage}  GPU usage\n"
-        L"{vram}       VRAM used/total\n"
-        L"{vram_used}  VRAM used\n"
-        L"{vram_total} VRAM total\n"
-        L"{disk_read}  Disk read speed\n"
-        L"{disk_write} Disk write speed\n"
-        L"{cpu_clock}  CPU clock\n"
-        L"{gpu_power}  GPU power\n"
-        L"{fan}        GPU fan speed (%)\n"
-        L"{battery}    Battery level + short status\n"
-        L"{battery_percent} Battery percentage only\n"
-        L"{battery_status}  Battery status text\n"
-        L"{system_power} Whole-system battery discharge power\n\n"
-        L"Display format controls:\n"
-        L"Enter         Start the second taskbar row directly\n"
-        L"\\n            Start the second row; same effect as Enter\n"
-        L"\\t            Start the next aligned column; matching columns align across rows\n\n"
-        L"Format 2.0 modifiers:\n"
-        L"{cpu_temp:1} one decimal   {cpu_clock:ghz} GHz   {ram_used:gb} GB\n"
-        L"{down:kb|mb|gb} forced rate unit; {down:short} compact K/M/G\n"
-        L"{battery:short} compact battery state, e.g. 79%A\n"
-        L"Conditional: {gpu_temp?GPU:{gpu_temp}}\n"
-        L"The body is hidden when the condition variable has no valid data.\n\n"
-        L"Example:\n"
-        L"温度:{cpu_temp}\\t占用:{cpu_usage}\\t内存:{ram_usage}\n"
-        L"上行:{up}\\t下行:{down}\\t电池:{battery}\n\n"
-        L"When Display format is not empty, it overrides the Full/Compact metric layout.",
-        L"Taskbar format variables", MB_OK | MB_ICONINFORMATION);
-}
-
 void SettingsWindow::ShowFormatHint() {
     if (!formatHint_ || !formatEdit_) return;
     RECT edit{};
     GetWindowRect(formatEdit_, &edit);
-    constexpr int hintWidth = 610;
-    constexpr int hintHeight = 245;
+    constexpr int hintWidth = 760;
+    constexpr int hintHeight = 215;
     int left = edit.left;
     // Prefer the area above the format editor so the hint never covers Preview.
     int top = edit.top - hintHeight - 4;
@@ -1105,7 +1061,6 @@ LRESULT CALLBACK SettingsWindow::Proc(HWND window, UINT message, WPARAM wParam, 
         if (LOWORD(wParam) == ValueColorAutoId) self->SetAutomaticValueColor();
         if (LOWORD(wParam) == AlertSettingsId) self->ShowThresholdSettings();
         if (LOWORD(wParam) == FontChooseId) self->ChooseTaskbarFont();
-        if (LOWORD(wParam) == FormatVariablesId) self->ShowFormatVariables();
         if (LOWORD(wParam) == FormatResetId) self->ResetTaskbarFormat();
         if (LOWORD(wParam) == HelpId) self->ShowHelp();
         if (LOWORD(wParam) == DiagnosticsId) self->ShowDiagnostics();

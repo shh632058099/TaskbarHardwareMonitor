@@ -644,7 +644,8 @@ std::wstring BuildDiagnosticsText(const SensorSnapshot& snapshot) {
                            L"Unavailable (driver or supported GPU not found)"));
     append(L"Disk temperature", state(snapshot.diskTemperatureValid,
                                        L"Unavailable (no supported drive)"));
-    append(L"Disk I/O", state(snapshot.diskIoValid, L"Unavailable (no supported drive)"));
+    append(L"Disk I/O", state(snapshot.diskIoValid,
+                                L"Unavailable (needs a second sample, or disk performance counters are unavailable)"));
     append(L"Battery", state(snapshot.batteryValid, L"Unavailable (no battery or unsupported state)"));
     append(L"System power", state(snapshot.systemPowerValid,
                                    L"Unavailable (no battery or unsupported state)"));

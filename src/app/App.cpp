@@ -112,6 +112,8 @@ void App::Worker() {
         }
 
         const ULONGLONG now = GetTickCount64();
+        const bool diagnosticSecondSampleDue = diagnosticsSecondSamplePending_ &&
+            now >= diagnosticsSecondSampleDeadline_;
         const DWORD collectionInterval = static_cast<DWORD>(refreshIntervalMs_.load());
         const bool collectionDue = !haveSample || forceRefresh ||
             now - lastCollectionTick >= collectionInterval;
@@ -125,8 +127,20 @@ void App::Worker() {
                 snapshotPublisher_.Publish(sample, config_);
             }
             lastPublishTick = GetTickCount64();
+            diagnosticsSecondSamplePending_ = true;
+            diagnosticsSecondSampleDeadline_ = GetTickCount64() + DiagnosticsSecondSampleDelayMs;
+        } else if (diagnosticSecondSampleDue) {
+            sample = sensors_.UpdateAll();
+            haveSample = true;
+            lastCollectionTick = GetTickCount64();
+            {
+                std::lock_guard<std::mutex> configLock(configMutex_);
+                snapshotPublisher_.Publish(sample, config_);
+            }
+            lastPublishTick = GetTickCount64();
             auto* result = new SensorSnapshot(sample);
             if (!PostMessageW(hwnd_, WM_APP + 7, 0, reinterpret_cast<LPARAM>(result))) delete result;
+            diagnosticsSecondSamplePending_ = false;
         } else if (collectionDue) {
             std::uint32_t demand = 0;
             {
@@ -172,7 +186,10 @@ void App::Worker() {
             }
         }
         const DWORD untilSave = MillisecondsUntilConfigSave(waitStart, configSaveDeadline_, configSavePending_);
-        const DWORD timeout = (std::min)((std::min)(untilCollection, untilHeartbeat), untilSave);
+        const DWORD untilDiagnostic = MillisecondsUntilConfigSave(
+            waitStart, diagnosticsSecondSampleDeadline_, diagnosticsSecondSamplePending_);
+        const DWORD timeout = (std::min)((std::min)(untilCollection, untilHeartbeat),
+                                         (std::min)(untilSave, untilDiagnostic));
         snapshotPublisher_.WaitForWake(timeout);
     }
 }
