@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../hardware/Sensor.h"
+#include "InternalThermoFanProvider.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -37,11 +37,13 @@ public:
                                    std::uint32_t timeoutMilliseconds) = 0;
 };
 
-class DellThermoFanWmiProvider {
+class DellThermoFanWmiProvider final : public IInternalThermoFanProvider {
 public:
     DellThermoFanWmiProvider();
     explicit DellThermoFanWmiProvider(IDellThermoFanDataSource& source);
     bool Read(DellThermoFanSnapshot& snapshot);
+    bool Read(SensorSnapshot& snapshot, std::uint64_t timestamp,
+              SensorCollection& sensors) override;
     bool Enabled() const { return available_; }
 private:
     IDellThermoFanDataSource* source_ = nullptr;

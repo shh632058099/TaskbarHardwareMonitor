@@ -103,6 +103,39 @@ public:
     std::uint32_t lastDataTimeout = 0;
 };
 
+class FakeInternalThermoFanProvider final : public monitor::IInternalThermoFanProvider {
+public:
+    FakeInternalThermoFanProvider(double cpuFanRpm, bool suppliesCpuFan,
+                                  double gpuFanRpm, bool suppliesGpuFan)
+        : cpuFanRpm_(cpuFanRpm), suppliesCpuFan_(suppliesCpuFan),
+          gpuFanRpm_(gpuFanRpm), suppliesGpuFan_(suppliesGpuFan) {}
+
+    bool Read(monitor::SensorSnapshot& snapshot, std::uint64_t timestamp,
+              monitor::SensorCollection& sensors) override {
+        ++calls;
+        if (suppliesCpuFan_) {
+            snapshot.cpuFanRpm = cpuFanRpm_;
+            snapshot.cpuFanRpmValid = true;
+            sensors.push_back({L"cpu.fan.rpm", L"CPU Fan", monitor::SensorType::Fan,
+                               cpuFanRpm_, true, timestamp});
+        }
+        if (suppliesGpuFan_) {
+            snapshot.gpuFanRpm = gpuFanRpm_;
+            snapshot.gpuFanRpmValid = true;
+            sensors.push_back({L"gpu.fan.rpm", L"GPU Fan", monitor::SensorType::Fan,
+                               gpuFanRpm_, true, timestamp});
+        }
+        return suppliesCpuFan_ || suppliesGpuFan_;
+    }
+
+    int calls = 0;
+private:
+    double cpuFanRpm_;
+    bool suppliesCpuFan_;
+    double gpuFanRpm_;
+    bool suppliesGpuFan_;
+};
+
 void TestProviderFallbacks() {
     double celsius = 0.0;
     FakeTemperatureProvider primary(true, 51.5);
@@ -400,6 +433,34 @@ void TestDellThermoFanDemandGate() {
           "an internal fan metric requests the ThermoFanData provider");
     Check(monitor::ShouldReadInternalThermoFans(monitor::AllSensorDemand),
           "diagnostic all-sensor demand requests the ThermoFanData provider");
+}
+
+void TestInternalThermoFanProviderAbstraction() {
+    FakeThermoFanDataSource source;
+    monitor::DellThermoFanWmiProvider provider(source);
+    monitor::SensorSnapshot snapshot;
+    monitor::SensorCollection sensors;
+    Check(provider.Read(snapshot, 123, sensors) && snapshot.cpuFanRpmValid &&
+              snapshot.cpuFanRpm == 1940.0,
+          "Dell adapter supplies CPU fan RPM through the provider-neutral contract");
+    Check(sensors.size() == 4 && sensors[2].identifier == L"cpu.fan.rpm" &&
+              sensors[3].identifier == L"gpu.fan.rpm",
+          "Dell adapter supplies provider-neutral internal sensor identifiers");
+}
+
+void TestInternalThermoFanProviderManagerCombinesProvidersByPriority() {
+    FakeInternalThermoFanProvider primary(1800.0, true, 0.0, false);
+    FakeInternalThermoFanProvider secondary(2100.0, true, 2200.0, true);
+    monitor::InternalThermoFanProviderManager providers({&primary, &secondary});
+    monitor::SensorSnapshot snapshot;
+    monitor::SensorCollection sensors;
+    Check(providers.Read(snapshot, 123, sensors) && primary.calls == 1 && secondary.calls == 1,
+          "internal provider manager queries all configured providers");
+    Check(snapshot.cpuFanRpmValid && snapshot.cpuFanRpm == 1800.0 &&
+              snapshot.gpuFanRpmValid && snapshot.gpuFanRpm == 2200.0,
+          "internal provider manager retains higher-priority readings and fills missing readings");
+    Check(sensors.size() == 2 && sensors[0].value == 1800.0 && sensors[1].value == 2200.0,
+          "internal provider manager retains sensors from the provider that supplied each reading");
 }
 
 void TestTemperatureConversion() {
@@ -1040,6 +1101,8 @@ int main() {
     TestDellThermoFanTaskbarFields();
     TestDellThermoFanProviderGatingAndRecovery();
     TestDellThermoFanDemandGate();
+    TestInternalThermoFanProviderAbstraction();
+    TestInternalThermoFanProviderManagerCombinesProvidersByPriority();
     TestTemperatureConversion();
     TestIntelMsrTemperature();
     TestIntelRaplPower();

@@ -3,6 +3,7 @@
 #include "SingleInstance.h"
 #include "../config/Config.h"
 #include "../monitor/SensorManager.h"
+#include "../monitor/DellThermoFanWmiProvider.h"
 #include "../ui/SettingsWindow.h"
 #include "../ipc/SharedSnapshotPublisher.h"
 
@@ -21,6 +22,7 @@ inline DWORD MillisecondsUntilConfigSave(ULONGLONG now, ULONGLONG deadline, bool
 
 class App {
 public:
+    App();
     bool Initialize(HINSTANCE instance);
     int Run();
 
@@ -32,7 +34,9 @@ private:
     HINSTANCE instance_{};
     HWND hwnd_{};
     Config config_{};
-    SensorManager sensors_{};
+    DellThermoFanWmiProvider internalThermoFan_{};
+    InternalThermoFanProviderManager internalThermoFanProviders_;
+    SensorManager sensors_;
     SettingsWindow settings_{};
     SingleInstance instanceGuard_{};
     SharedSnapshotPublisher snapshotPublisher_{};

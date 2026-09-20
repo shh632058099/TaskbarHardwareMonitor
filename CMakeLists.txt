@@ -31,6 +31,8 @@ add_executable(TaskbarHardwareMonitor WIN32
     src/monitor/WmiTemperatureProvider.h
     src/monitor/DellThermoFanWmiProvider.cpp
     src/monitor/DellThermoFanWmiProvider.h
+    src/monitor/InternalThermoFanProvider.h
+    src/monitor/InternalThermoFanProvider.cpp
     src/hardware/HardwareAccess.h
     src/hardware/CpuVendor.cpp
     src/hardware/CpuVendor.h
@@ -127,6 +129,8 @@ if(BUILD_UNIT_TESTS)
         src/monitor/WmiTemperatureProvider.h
         src/monitor/DellThermoFanWmiProvider.cpp
         src/monitor/DellThermoFanWmiProvider.h
+        src/monitor/InternalThermoFanProvider.h
+        src/monitor/InternalThermoFanProvider.cpp
         src/hardware/CpuVendor.cpp
         src/hardware/CpuVendor.h
         src/hardware/bus/PciAccess.cpp

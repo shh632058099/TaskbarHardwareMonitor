@@ -206,4 +206,21 @@ bool DellThermoFanWmiProvider::Read(DellThermoFanSnapshot& snapshot) {
     return valid;
 }
 
+bool DellThermoFanWmiProvider::Read(SensorSnapshot& snapshot, std::uint64_t timestamp,
+                                    SensorCollection& sensors) {
+    DellThermoFanSnapshot dellSnapshot;
+    if (!Read(dellSnapshot)) return false;
+
+    snapshot.cpuInternalTemperature = dellSnapshot.cpuTemperature;
+    snapshot.cpuInternalTemperatureValid = dellSnapshot.cpuTemperatureValid;
+    snapshot.gpuInternalTemperature = dellSnapshot.gpuTemperature;
+    snapshot.gpuInternalTemperatureValid = dellSnapshot.gpuTemperatureValid;
+    snapshot.cpuFanRpm = dellSnapshot.cpuFanRpm;
+    snapshot.cpuFanRpmValid = dellSnapshot.cpuFanRpmValid;
+    snapshot.gpuFanRpm = dellSnapshot.gpuFanRpm;
+    snapshot.gpuFanRpmValid = dellSnapshot.gpuFanRpmValid;
+    AddDellThermoFanSensors(dellSnapshot, timestamp, sensors);
+    return true;
+}
+
 } // namespace monitor

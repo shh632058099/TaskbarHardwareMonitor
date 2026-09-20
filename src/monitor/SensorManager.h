@@ -6,7 +6,7 @@
 #include "SystemMonitor.h"
 #include "SensorDemand.h"
 #include "SnapshotSensorProvider.h"
-#include "DellThermoFanWmiProvider.h"
+#include "InternalThermoFanProvider.h"
 #include "../hardware/SensorRegistry.h"
 
 namespace monitor {
@@ -17,6 +17,7 @@ inline bool ShouldReadInternalThermoFans(std::uint32_t demand) {
 
 class SensorManager {
 public:
+    explicit SensorManager(IInternalThermoFanProvider& internalThermoFan);
     void SetNetworkAdapter(const std::wstring& adapter) { network_.SetAdapter(adapter); }
     void SetStorageDrive(int index) { storage_.SetDriveIndex(index); }
     SensorSnapshot Update(std::uint32_t demand, bool forceRefresh = false);
@@ -29,6 +30,6 @@ private:
     SystemMonitor system_;
     StorageMonitor storage_;
     SensorRegistry registry_;
-    DellThermoFanWmiProvider dellThermoFan_;
+    IInternalThermoFanProvider* internalThermoFan_ = nullptr;
 };
 }

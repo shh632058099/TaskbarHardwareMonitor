@@ -6,6 +6,10 @@
 
 namespace monitor {
 
+App::App()
+    : internalThermoFanProviders_({&internalThermoFan_}),
+      sensors_(internalThermoFanProviders_) {}
+
 bool App::Initialize(HINSTANCE instance) {
     if (!instanceGuard_.Acquire()) {
         return false;
