@@ -19,6 +19,18 @@
 
 namespace monitor {
 
+StorageMonitor::~StorageMonitor() {
+    CloseIoHandle();
+}
+
+void StorageMonitor::CloseIoHandle() {
+    if (ioDriveHandle_ != INVALID_HANDLE_VALUE) {
+        CloseHandle(ioDriveHandle_);
+        ioDriveHandle_ = INVALID_HANDLE_VALUE;
+    }
+    ioHandleDriveIndex_ = -1;
+}
+
 namespace {
 
 std::wstring TrimStorageText(std::wstring value) {
@@ -57,6 +69,15 @@ const wchar_t* BusName(STORAGE_BUS_TYPE bus) {
 }
 
 } // namespace
+
+const std::vector<StorageDeviceInfo>& StorageMonitor::CachedDevices(ULONGLONG now) {
+    constexpr ULONGLONG DeviceCacheLifetimeMs = 30000;
+    if (deviceCacheTick_ == 0 || now - deviceCacheTick_ >= DeviceCacheLifetimeMs) {
+        devices_ = EnumerateStorageDevices();
+        deviceCacheTick_ = now;
+    }
+    return devices_;
+}
 
 std::vector<StorageDeviceInfo> EnumerateStorageDevices() {
     std::vector<StorageDeviceInfo> devices;
@@ -212,23 +233,27 @@ bool StorageMonitor::ReadDriveTemperature(DWORD index, bool nvme, double& temper
 void StorageMonitor::UpdateDiskIo(SensorSnapshot& snapshot, int driveIndex) {
     if (driveIndex < 0 || driveIndex >= 32) return;
 
-    wchar_t path[64]{};
-    wsprintfW(path, L"\\\\.\\PhysicalDrive%d", driveIndex);
-    HANDLE drive = CreateFileW(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                               nullptr, OPEN_EXISTING, 0, nullptr);
-    if (drive == INVALID_HANDLE_VALUE) {
-        drive = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                            nullptr, OPEN_EXISTING, 0, nullptr);
+    if (ioHandleDriveIndex_ != driveIndex || ioDriveHandle_ == INVALID_HANDLE_VALUE) {
+        CloseIoHandle();
+        wchar_t path[64]{};
+        wsprintfW(path, L"\\\\.\\PhysicalDrive%d", driveIndex);
+        ioDriveHandle_ = CreateFileW(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                     nullptr, OPEN_EXISTING, 0, nullptr);
+        if (ioDriveHandle_ == INVALID_HANDLE_VALUE) {
+            ioDriveHandle_ = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                         nullptr, OPEN_EXISTING, 0, nullptr);
+        }
+        if (ioDriveHandle_ != INVALID_HANDLE_VALUE) ioHandleDriveIndex_ = driveIndex;
     }
-    if (drive == INVALID_HANDLE_VALUE) return;
+    if (ioDriveHandle_ == INVALID_HANDLE_VALUE) return;
 
     DISK_PERFORMANCE performance{};
     DWORD returned = 0;
-    const bool ok = DeviceIoControl(drive, IOCTL_DISK_PERFORMANCE, nullptr, 0,
+    const bool ok = DeviceIoControl(ioDriveHandle_, IOCTL_DISK_PERFORMANCE, nullptr, 0,
                                     &performance, sizeof(performance), &returned, nullptr) != FALSE;
-    CloseHandle(drive);
     if (!ok || returned < sizeof(performance) || performance.BytesRead.QuadPart < 0 ||
         performance.BytesWritten.QuadPart < 0) {
+        CloseIoHandle();
         ioInitialized_ = false;
         return;
     }
@@ -269,6 +294,7 @@ void StorageMonitor::Update(SensorSnapshot& snapshot, bool collectTemperature, b
                 temperatureValid_ = true;
             }
         } else {
+            const auto now = GetTickCount64();
             if (preferredDriveIndex_ >= 0) {
                 double temperature = 0.0;
                 if (ReadDriveTemperature(static_cast<DWORD>(preferredDriveIndex_),
@@ -279,14 +305,18 @@ void StorageMonitor::Update(SensorSnapshot& snapshot, bool collectTemperature, b
                     preferredDriveIndex_ = -1;
                 }
             }
-            for (int pass = 0; pass < 2 && !temperatureValid_; ++pass) {
-                for (DWORD index = 0; index < 32; ++index) {
+            constexpr ULONGLONG TemperatureRetryDelayMs = 5000;
+            if (!temperatureValid_ &&
+                (lastScan_ == 0 || now - lastScan_ >= TemperatureRetryDelayMs)) {
+                lastScan_ = now;
+                const auto& devices = CachedDevices(now);
+                for (const auto& device : devices) {
                     double temperature = 0.0;
-                    const bool nvme = pass == 0;
-                    if (ReadDriveTemperature(index, nvme, temperature)) {
+                    const bool nvme = device.bus == L"NVMe";
+                    if (ReadDriveTemperature(static_cast<DWORD>(device.index), nvme, temperature)) {
                         temperature_ = temperature;
                         temperatureValid_ = true;
-                        preferredDriveIndex_ = static_cast<int>(index);
+                        preferredDriveIndex_ = device.index;
                         preferredDriveNvme_ = nvme;
                         break;
                     }
@@ -303,7 +333,7 @@ void StorageMonitor::Update(SensorSnapshot& snapshot, bool collectTemperature, b
     if (collectIo) {
         int ioDrive = selectedDriveIndex_ >= 0 ? selectedDriveIndex_ : preferredDriveIndex_;
         if (ioDrive < 0) {
-            const auto devices = EnumerateStorageDevices();
+            const auto& devices = CachedDevices(GetTickCount64());
             for (const auto& device : devices) {
                 if (device.bus == L"NVMe") { ioDrive = device.index; break; }
             }

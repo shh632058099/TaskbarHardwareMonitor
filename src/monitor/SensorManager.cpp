@@ -46,11 +46,15 @@ SensorSnapshot SensorManager::Update(std::uint32_t demand, bool forceRefresh) {
     else storage_.ResetIoSampling();
 
     registry_.Clear();
-    SensorCollection generic;
-    AddSnapshotSensors(s, demand, static_cast<std::uint64_t>(GetTickCount64()), generic);
-    if (ShouldReadInternalThermoFans(demand) && internalThermoFan_)
-        internalThermoFan_->Read(s, static_cast<std::uint64_t>(GetTickCount64()), generic);
-    for (auto& value : generic) registry_.Upsert(std::move(value));
+    // Generic sensor values are consumed by diagnostics/internal providers only.
+    // Avoid rebuilding and copying the collection during ordinary taskbar updates.
+    if (ShouldReadInternalThermoFans(demand)) {
+        SensorCollection generic;
+        AddSnapshotSensors(s, demand, static_cast<std::uint64_t>(GetTickCount64()), generic);
+        if (internalThermoFan_)
+            internalThermoFan_->Read(s, static_cast<std::uint64_t>(GetTickCount64()), generic);
+        for (auto& value : generic) registry_.Upsert(std::move(value));
+    }
     return s;
 }
 }

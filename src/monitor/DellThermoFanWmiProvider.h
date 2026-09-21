@@ -51,6 +51,10 @@ private:
     bool manufacturerChecked_ = false;
     bool manufacturerIsDell_ = false;
     bool available_ = false;
+    std::uint64_t nextManufacturerRetryTick_ = 0;
+    std::uint64_t nextDataRetryTick_ = 0;
+    std::uint64_t lastSuccessfulReadTick_ = 0;
+    DellThermoFanSnapshot cachedSnapshot_{};
 };
 
 } // namespace monitor

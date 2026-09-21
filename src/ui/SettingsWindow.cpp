@@ -920,7 +920,7 @@ void SettingsWindow::SaveAndClose() {
     wchar_t interval[16]{};
     GetWindowTextW(interval_, interval, _countof(interval));
     const int value = _wtoi(interval);
-    if (value >= 250 && value <= 10000) updated.refreshIntervalMs = value;
+    if (value >= 250 && value <= 60000) updated.refreshIntervalMs = value;
     updated.startWithWindows = SendMessageW(startup_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     updated.taskbarValueColorCustom = valueColorCustom_;
     updated.taskbarValueColor = static_cast<unsigned int>(valueColor_ & 0x00FFFFFFu);

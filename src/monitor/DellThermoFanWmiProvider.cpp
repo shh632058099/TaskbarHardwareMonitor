@@ -117,6 +117,9 @@ bool ReadThermoFanData(std::vector<std::uint8_t>& data, std::uint32_t timeoutMil
     return valid;
 }
 
+constexpr std::uint64_t WmiRetryDelayMs = 5000;
+constexpr std::uint64_t WmiValueRetentionMs = 15000;
+
 class WmiDellThermoFanDataSource final : public IDellThermoFanDataSource {
 public:
     bool ReadManufacturer(std::wstring& manufacturer,
@@ -183,7 +186,8 @@ DellThermoFanWmiProvider::DellThermoFanWmiProvider(IDellThermoFanDataSource& sou
     : source_(&source), ownsComInitialization_(false) {}
 
 bool DellThermoFanWmiProvider::Read(DellThermoFanSnapshot& snapshot) {
-    snapshot = {};
+    snapshot = cachedSnapshot_;
+    const auto now = GetTickCount64();
     HRESULT initialized = S_FALSE;
     bool uninitialize = false;
     if (ownsComInitialization_) {
@@ -193,16 +197,31 @@ bool DellThermoFanWmiProvider::Read(DellThermoFanSnapshot& snapshot) {
     }
 
     std::vector<std::uint8_t> data;
-    if (!manufacturerChecked_) {
+    if (!manufacturerChecked_ && (!ownsComInitialization_ || now >= nextManufacturerRetryTick_)) {
         std::wstring manufacturer;
         if (source_->ReadManufacturer(manufacturer, DellThermoFanWmiQueryTimeoutMilliseconds)) {
             manufacturerIsDell_ = IsDellSmbiosManufacturer(manufacturer);
             manufacturerChecked_ = true;
+        } else {
+            nextManufacturerRetryTick_ = now + WmiRetryDelayMs;
         }
     }
-    const bool valid = manufacturerIsDell_ && source_->ReadThermoFanData(
-        data, DellThermoFanWmiQueryTimeoutMilliseconds) &&
-                       DecodeDellThermoFanSnapshot(data.data(), data.size(), snapshot);
+    bool valid = false;
+    if (manufacturerIsDell_ && (!ownsComInitialization_ || now >= nextDataRetryTick_)) {
+        valid = source_->ReadThermoFanData(data, DellThermoFanWmiQueryTimeoutMilliseconds) &&
+                DecodeDellThermoFanSnapshot(data.data(), data.size(), snapshot);
+        if (valid) {
+            cachedSnapshot_ = snapshot;
+            lastSuccessfulReadTick_ = now;
+            nextDataRetryTick_ = 0;
+        } else {
+            nextDataRetryTick_ = now + WmiRetryDelayMs;
+        }
+    }
+    if (!valid && lastSuccessfulReadTick_ != 0 && now - lastSuccessfulReadTick_ <= WmiValueRetentionMs) {
+        snapshot = cachedSnapshot_;
+        valid = true;
+    }
     available_ = valid;
     if (uninitialize) CoUninitialize();
     return valid;

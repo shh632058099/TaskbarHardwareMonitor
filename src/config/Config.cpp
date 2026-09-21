@@ -284,7 +284,7 @@ bool Config::Load() {
         const auto colon = text.find(':', position);
         if (colon != std::string::npos) {
             const long value = std::strtol(text.c_str() + colon + 1, nullptr, 10);
-            if (value >= 250 && value <= 10000) refreshIntervalMs = static_cast<int>(value);
+            if (value >= 250 && value <= 60000) refreshIntervalMs = static_cast<int>(value);
         }
     }
     startWithWindows = HasTrue(text, "start_with_windows");

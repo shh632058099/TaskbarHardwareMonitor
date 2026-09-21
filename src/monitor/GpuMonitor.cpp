@@ -14,8 +14,6 @@ using Shutdown = Return (*)();
 using DeviceCount = Return (*)(unsigned int*);
 using DeviceByIndex = Return (*)(unsigned int, Device*);
 using Temperature = Return (*)(Device, int, unsigned int*);
-struct NvmlUtilization { unsigned int gpu; unsigned int memory; };
-struct NvmlMemory { unsigned long long total; unsigned long long free; unsigned long long used; };
 using UtilizationRates = Return (*)(Device, NvmlUtilization*);
 using MemoryInfo = Return (*)(Device, NvmlMemory*);
 using PowerUsage = Return (*)(Device, unsigned int*);
@@ -93,6 +91,11 @@ void GpuMonitor::Initialize() {
     }
 
     module_ = module;
+    temperatureFunction_ = GetFunction<Temperature>(module, "nvmlDeviceGetTemperature");
+    utilizationFunction_ = GetFunction<UtilizationRates>(module, "nvmlDeviceGetUtilizationRates");
+    memoryFunction_ = GetFunction<MemoryInfo>(module, "nvmlDeviceGetMemoryInfo");
+    powerFunction_ = GetFunction<PowerUsage>(module, "nvmlDeviceGetPowerUsage");
+    fanFunction_ = GetFunction<FanSpeed>(module, "nvmlDeviceGetFanSpeed");
     nextRetryTick_ = 0;
 }
 
@@ -100,12 +103,9 @@ void GpuMonitor::Update(SensorSnapshot& snapshot, std::uint32_t demand) {
     Initialize();
     const auto now = GetTickCount64();
     if (module_ && device_) {
-        HMODULE module = static_cast<HMODULE>(module_);
-
         if (HasSensorDemand(demand, DemandGpuTemperature)) {
-            const auto temperature = GetFunction<Temperature>(module, "nvmlDeviceGetTemperature");
             unsigned int value = 0;
-            if (temperature && temperature(device_, TemperatureSensor, &value) == Success && value < 150) {
+            if (temperatureFunction_ && temperatureFunction_(device_, TemperatureSensor, &value) == Success && value < 150) {
                 temperature_ = static_cast<double>(value);
                 temperatureValid_ = true;
                 temperatureSuccessTick_ = now;
@@ -113,9 +113,9 @@ void GpuMonitor::Update(SensorSnapshot& snapshot, std::uint32_t demand) {
         }
 
         if (HasSensorDemand(demand, DemandGpuUsage)) {
-            if (const auto utilization = GetFunction<UtilizationRates>(module, "nvmlDeviceGetUtilizationRates")) {
+            if (utilizationFunction_) {
                 NvmlUtilization rates{};
-                if (utilization(device_, &rates) == Success && rates.gpu <= 100) {
+                if (utilizationFunction_(device_, &rates) == Success && rates.gpu <= 100) {
                     snapshot.gpuUsage = static_cast<double>(rates.gpu);
                     snapshot.gpuUsageValid = true;
                 }
@@ -123,9 +123,9 @@ void GpuMonitor::Update(SensorSnapshot& snapshot, std::uint32_t demand) {
         }
 
         if (HasSensorDemand(demand, DemandVram)) {
-            if (const auto memoryInfo = GetFunction<MemoryInfo>(module, "nvmlDeviceGetMemoryInfo")) {
+            if (memoryFunction_) {
                 NvmlMemory memory{};
-                if (memoryInfo(device_, &memory) == Success && memory.total > 0 && memory.used <= memory.total) {
+                if (memoryFunction_(device_, &memory) == Success && memory.total > 0 && memory.used <= memory.total) {
                     snapshot.gpuMemoryUsedBytes = memory.used;
                     snapshot.gpuMemoryTotalBytes = memory.total;
                     snapshot.gpuMemoryValid = true;
@@ -134,9 +134,9 @@ void GpuMonitor::Update(SensorSnapshot& snapshot, std::uint32_t demand) {
         }
 
         if (HasSensorDemand(demand, DemandGpuPower)) {
-            if (const auto powerUsage = GetFunction<PowerUsage>(module, "nvmlDeviceGetPowerUsage")) {
+            if (powerFunction_) {
                 unsigned int milliwatts = 0;
-                if (powerUsage(device_, &milliwatts) == Success && milliwatts < 1000000u) {
+                if (powerFunction_(device_, &milliwatts) == Success && milliwatts < 1000000u) {
                     snapshot.gpuPower = static_cast<double>(milliwatts) / 1000.0;
                     snapshot.gpuPowerValid = true;
                 }
@@ -144,9 +144,9 @@ void GpuMonitor::Update(SensorSnapshot& snapshot, std::uint32_t demand) {
         }
 
         if (HasSensorDemand(demand, DemandFan)) {
-            if (const auto fanSpeed = GetFunction<FanSpeed>(module, "nvmlDeviceGetFanSpeed")) {
+            if (fanFunction_) {
                 unsigned int percent = 0;
-                if (fanSpeed(device_, &percent) == Success && percent <= 100) {
+                if (fanFunction_(device_, &percent) == Success && percent <= 100) {
                     snapshot.gpuFanPercent = static_cast<double>(percent);
                     snapshot.gpuFanValid = true;
                 }

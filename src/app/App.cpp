@@ -123,7 +123,8 @@ void App::Worker() {
         const ULONGLONG now = GetTickCount64();
         const bool diagnosticSecondSampleDue = diagnosticsSecondSamplePending_ &&
             now >= diagnosticsSecondSampleDeadline_;
-        const DWORD collectionInterval = static_cast<DWORD>(refreshIntervalMs_.load());
+        const DWORD collectionInterval = static_cast<DWORD>(
+            std::clamp(refreshIntervalMs_.load(), 250, 60000));
         const bool collectionDue = !haveSample || forceRefresh ||
             now - lastCollectionTick >= collectionInterval;
 
