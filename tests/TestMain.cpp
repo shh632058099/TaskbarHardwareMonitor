@@ -373,13 +373,22 @@ void TestDellThermoFanSnapshotValidation() {
     malformed[3] = 126;
     malformed[14] = 0xFF;
     malformed[15] = 0xFF;
-    malformed[22] = 0;
-    malformed[23] = 0;
+    malformed[22] = 0x11;
+    malformed[23] = 0x27;
     Check(monitor::DecodeDellThermoFanSnapshot(malformed.data(), malformed.size(), snapshot),
           "Dell ThermoFanData keeps a structurally valid snapshot with invalid individual readings");
     Check(!snapshot.cpuTemperatureValid && !snapshot.gpuTemperatureValid &&
               !snapshot.cpuFanRpmValid && !snapshot.gpuFanRpmValid,
           "Dell ThermoFanData rejects out-of-range temperatures and fan speeds");
+
+    malformed[14] = 0;
+    malformed[15] = 0;
+    malformed[22] = 0;
+    malformed[23] = 0;
+    Check(monitor::DecodeDellThermoFanSnapshot(malformed.data(), malformed.size(), snapshot) &&
+              snapshot.cpuFanRpmValid && snapshot.cpuFanRpm == 0 &&
+              snapshot.gpuFanRpmValid && snapshot.gpuFanRpm == 0,
+          "Dell ThermoFanData treats stopped fans as valid zero RPM readings");
 }
 
 void TestDellThermoFanProviderGatingAndRecovery() {

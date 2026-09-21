@@ -12,7 +12,9 @@ namespace {
 
 constexpr std::uint8_t MinimumTemperatureCelsius = 1;
 constexpr std::uint8_t MaximumTemperatureCelsius = 125;
-constexpr std::uint16_t MinimumFanRpm = 1;
+// A stopped fan is reported by Dell's ThermoFanData provider as 0 RPM.
+// Zero is a valid reading; only values above the hardware-safe maximum are invalid.
+constexpr std::uint16_t MinimumFanRpm = 0;
 constexpr std::uint16_t MaximumFanRpm = 10000;
 
 std::uint16_t DecodeLittleEndian16(const std::uint8_t* data) {
